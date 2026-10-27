@@ -13,9 +13,12 @@
     <string name="dev_share">Compartir</string>
     <string name="dev_copy_again">Copiar de nuevo</string>
     <string name="dev_data">Datos bajados</string>
-    <string name="dev_data_summary">Para comparar \"Videos solo al tocar\": ponelo en cero, usá IG Lite unos minutos y volvé a mirar.</string>
+    <string name="dev_data_summary">Para probar \"Videos solo al tocar\", los anuncios y las historias: ponelo en cero, usá IG Lite y YT Lite y volvé a mirar. Cuenta aunque la página se recargue y se puede copiar.</string>
     <string name="dev_data_msg">Desde %1$s, Lúcido bajó %2$s MB (IG Lite, YT Lite y el resto de la app).</string>
     <string name="dev_data_reset">Poner en cero</string>
     <string name="dev_data_zero">Listo: cuenta desde ahora</string>
     <string name="dev_data_none">Este teléfono no informa los datos de cada app</string>
+    <string name="dev_data_no_pages">IG Lite y YT Lite no están abiertas: abrilas, usalas y volvé a mirar.</string>
+    <string name="dev_copy">Copiar</string>
+    <string name="dev_data_copied">Copiado: pegalo en el chat.</string>
 </resources>

@@ -13,9 +13,12 @@
     <string name="dev_share">Share</string>
     <string name="dev_copy_again">Copy again</string>
     <string name="dev_data">Data downloaded</string>
-    <string name="dev_data_summary">To compare \"Tap to play videos\": reset it, use IG Lite for a few minutes and check again.</string>
+    <string name="dev_data_summary">To test \"Tap to play videos\", ads and stories: reset it, use IG Lite and YT Lite and check again. Keeps counting if the page reloads, and can be copied.</string>
     <string name="dev_data_msg">Since %1$s, Lúcido downloaded %2$s MB (IG Lite, YT Lite and the rest of the app).</string>
     <string name="dev_data_reset">Reset</string>
     <string name="dev_data_zero">Done: counting from now</string>
     <string name="dev_data_none">This phone doesn\'t report data per app</string>
+    <string name="dev_data_no_pages">IG Lite and YT Lite aren\'t open: open them, use them and check again.</string>
+    <string name="dev_copy">Copy</string>
+    <string name="dev_data_copied">Copied: paste it in the chat.</string>
 </resources>

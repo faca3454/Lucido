@@ -67,8 +67,20 @@
   addEventListener('popstate', auto);
 
   // Video que bajó la página: pedidos que salieron de verdad (block.user.js va después y retiene los suyos
-  // antes de llegar acá) y cuánto pesaban. Más lo que "Videos solo al tocar" dejó esperando, mandó o descartó
-  const data = { n: 0, bytes: 0, held: 0, sent: 0, dropped: 0 };
+  // antes de llegar acá) y cuánto pesaban. Más lo que "Videos solo al tocar" dejó esperando, mandó o descartó,
+  // y lo que hizo el script por su cuenta (notes). Se guarda en la pestaña (sessionStorage): sigue contando
+  // aunque la página se recargue, hasta "Poner en cero" (Ajustes → Pruebas → Datos bajados)
+  const KEY = 'lucido-dev';
+  let saved = {};
+  try { saved = JSON.parse(sessionStorage.getItem(KEY)) || {}; } catch (e) {}
+  const data = Object.assign({ n: 0, bytes: 0, held: 0, sent: 0, dropped: 0 }, saved.data);
+  const notes = Object.assign({}, saved.notes);
+  let saving = 0;
+  const save = () => {
+    clearTimeout(saving);
+    saving = setTimeout(() => { try { sessionStorage.setItem(KEY, JSON.stringify({ data, notes })); } catch (e) {} }, 300);
+  };
+  addEventListener('pagehide', () => { try { sessionStorage.setItem(KEY, JSON.stringify({ data, notes })); } catch (e) {} });
   const isVideo = (url) => {
     try {
       const u = new URL(url, location.href);
@@ -78,12 +90,13 @@
       return false;
     }
   };
-  const weigh = (h) => { const n = parseInt(h, 10); if (n > 0) data.bytes += n; };
+  const weigh = (h) => { const n = parseInt(h, 10); if (n > 0) { data.bytes += n; save(); } };
   const fetch0 = window.fetch;
   window.fetch = function (input) {
     const p = fetch0.apply(window, arguments);
     if (isVideo(input instanceof Request ? input.url : String(input))) {
       data.n++;
+      save();
       p.then((r) => weigh(r.headers.get('content-length')), () => {});
     }
     return p;
@@ -96,6 +109,7 @@
   XMLHttpRequest.prototype.send = function () {
     if (xvideo.has(this)) {
       data.n++;
+      save();
       this.addEventListener('loadend', () => weigh(this.getResponseHeader('content-length')), { once: true });
     }
     return xsend.apply(this, arguments);
@@ -186,16 +200,22 @@
     if (lastTap && lastTap.event === e) { lastTap.reached = true; lastTap.prevented = e.defaultPrevented; }
   });
 
+  // Lo que hizo el script por su cuenta, con cuántas veces (solo lo que no tiene datos de nadie)
+  const script = () => {
+    const all = Object.entries(notes);
+    return all.length ? ['Lo que hizo el script (veces):', ...all.slice(-25).map(([w, n]) => `  ${w}: ${n}`)] : [];
+  };
+  const videoLine = () => `Video bajado: ${data.n} pedidos, ${(data.bytes / 1048576).toFixed(1)} MB` +
+    (data.held ? ` · solo al tocar: ${data.held} en espera, ${data.sent} mandados después, ${data.dropped} descartados` : '');
+
   // Resumen de lo medido en esta página (para el informe de la medición automática); null si no hay nada
   const summary = () => {
-    if (!navs.length && !videos.length && !tasks.length && !data.n && !data.held && !trace.length) return null;
+    if (!navs.length && !videos.length && !tasks.length && !data.n && !data.held && !Object.keys(notes).length) return null;
     const long = {}; // pantalla → [cantidad, ms en total, ms la más larga]
     for (const [start, ms] of tasks) {
       const k = visits.filter(([t]) => t <= start).pop()[1], t = long[k] || (long[k] = [0, 0, 0]);
       t[0]++; t[1] += ms; t[2] = Math.max(t[2], ms);
     }
-    const notes = {}; // lo que hizo block.user.js por su cuenta, con cuántas veces
-    for (const [, w] of trace) notes[w] = (notes[w] || 0) + 1;
     const sorted = [...videos].sort((a, b) => a - b);
     const chrome = (navigator.userAgent.match(/Chrome\/[\d.]+/) || ['?'])[0];
     return [
@@ -206,9 +226,8 @@
       '  ' + navs.slice(-30).join(' · '),
       `Videos, de play() a playing (ms): ${sorted.length ? `mediana ${sorted[sorted.length >> 1]}, máx ${sorted[sorted.length - 1]} (n=${sorted.length})` : 'ninguno'}`,
       '  ' + videos.slice(-30).join(' '),
-      `Video bajado: ${data.n} pedidos, ${(data.bytes / 1048576).toFixed(1)} MB` +
-        (data.held ? ` · solo al tocar: ${data.held} en espera, ${data.sent} mandados después, ${data.dropped} descartados` : ''),
-      ...(trace.length ? ['Lo que hizo el script (veces):', ...Object.entries(notes).slice(-20).map(([w, n]) => `  ${w}: ${n}`)] : []),
+      videoLine(),
+      ...script(),
       ...taps.map((t) => `Toque en foto/video de un chat: ${t.media} · llegó a la página: ${t.reached ? (t.prevented ? 'sí (y alguien lo usó)' : 'sí') : 'no'}` +
         `\n  después: ${t.after || 'sin medir'}\n  otra igual: ${t.twins}\n  cadena: ${t.chain}\n  ${t.card}`),
     ].join('\n');
@@ -247,10 +266,14 @@
   window.__lucidoDev = {
     // Avisos de block.user.js
     on(what, x) {
-      if (what === 'note') trace.push([performance.now(), x]);
+      if (what === 'note') {
+        trace.push([performance.now(), x]);
+        notes[x] = (notes[x] || 0) + 1;
+        save();
+      }
       else if (what === 'ready') { if (ready === null) ready = performance.now(); }
       else if (what === 'swipe') swipeFailed(x);
-      else if (what === 'video') data[x]++;
+      else if (what === 'video') { data[x]++; save(); }
     },
     // Medición automática: empieza a medir lo que hace el paso que sigue (con video, hasta que arranca).
     // Devuelve el id de la página, para saber después si se recargó.
@@ -279,5 +302,16 @@
     },
     id,
     summary,
+    // Para "Datos bajados": video y lo que hizo el script desde que se puso en cero (null si nada)
+    report() {
+      if (!data.n && !data.held && !Object.keys(notes).length) return null;
+      const name = /instagram/.test(location.hostname) ? 'Instagram' : /youtube/.test(location.hostname) ? 'YouTube' : location.hostname;
+      return [name, videoLine(), ...script()].join('\n');
+    },
+    reset() {
+      for (const k of Object.keys(data)) data[k] = 0;
+      for (const k of Object.keys(notes)) delete notes[k];
+      try { sessionStorage.removeItem(KEY); } catch (e) {}
+    },
   };
 })();

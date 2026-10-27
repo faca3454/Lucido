@@ -74,30 +74,53 @@ object DevTools {
         cat.addPreference(Preference(c).apply {
             title = c.getString(R.string.dev_data)
             summary = c.getString(R.string.dev_data_summary)
-            setOnPreferenceClickListener { showData(c); true }
+            setOnPreferenceClickListener { showData(f); true }
         })
     }
 
     /**
-     * Datos que bajó la app (las páginas de IG Lite y YT Lite van por la app) desde que se puso en cero, o
-     * desde que se prendió el teléfono: para comparar "Videos solo al tocar" prendido y apagado.
+     * Para probar "Videos solo al tocar", los anuncios y las historias: los datos que bajó la app (las páginas
+     * de IG Lite y YT Lite van por la app) desde que se puso en cero, o desde que se prendió el teléfono, y, de
+     * cada página abierta, cuánto video bajó y lo que hizo el script (devtools.js lo guarda aunque la página se
+     * recargue). Se puede copiar para pasarlo al chat. "Poner en cero" empieza todo de nuevo.
      */
-    private fun showData(c: Context) {
+    private fun showData(f: PreferenceFragmentCompat) = f.lifecycleScope.launch {
+        val c = f.requireContext()
         val now = TrafficStats.getUidRxBytes(Process.myUid())
-        if (now < 0) return Toast.makeText(c, R.string.dev_data_none, Toast.LENGTH_LONG).show()
+        if (now < 0) return@launch Toast.makeText(c, R.string.dev_data_none, Toast.LENGTH_LONG).show()
         val prefs = c.getSharedPreferences("devtools", Context.MODE_PRIVATE)
         val zero = prefs.getLong("rx", 0)
         val fromBoot = zero > now // se reinició el teléfono: el contador de Android volvió a cero
         val since = if (fromBoot || zero == 0L) System.currentTimeMillis() - SystemClock.elapsedRealtime() else prefs.getLong("rx_at", 0)
         val mb = String.format(Locale.getDefault(), "%.1f", (now - if (fromBoot) 0 else zero) / 1_048_576.0)
         val at = DateUtils.formatSameDayTime(since, System.currentTimeMillis(), java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
-        AlertDialog.Builder(c).setTitle(R.string.dev_data).setMessage(c.getString(R.string.dev_data_msg, at, mb))
+        val pages = openPages()
+        val reports = pages.mapNotNull { eval(it, "window.__lucidoDev ? __lucidoDev.report() : null") as? String }
+        val text = (listOf(c.getString(R.string.dev_data_msg, at, mb)) +
+            (if (pages.isEmpty()) listOf(c.getString(R.string.dev_data_no_pages)) else reports)).joinToString("\n\n")
+        AlertDialog.Builder(c).setTitle(R.string.dev_data).setMessage(text)
             .setPositiveButton(R.string.dev_data_reset) { _, _ ->
                 prefs.edit().putLong("rx", now).putLong("rx_at", System.currentTimeMillis()).apply()
+                for (v in openPages()) v.evaluateJavascript("window.__lucidoDev && __lucidoDev.reset()", null)
                 Toast.makeText(c, R.string.dev_data_zero, Toast.LENGTH_LONG).show()
             }
+            .setNeutralButton(R.string.dev_copy) { _, _ -> copy(c, "Lúcido datos · ${BuildConfig.VERSION_NAME}\n$text", R.string.dev_data_copied) }
             .setNegativeButton(R.string.done, null).show()
     }
+
+    /** Las páginas de IG Lite y YT Lite, si la pantalla está armada (aunque esté en segundo plano). */
+    private fun openPages(): List<WebView> = MainActivity.Bridge.screen?.window?.decorView?.let(::webViews) ?: emptyList()
+
+    private fun webViews(v: View): List<WebView> = when (v) {
+        is WebView -> listOf(v)
+        is ViewGroup -> (0 until v.childCount).flatMap { webViews(v.getChildAt(it)) }
+        else -> emptyList()
+    }
+
+    // Si la página no contesta (Android puede no hacerlo si cambia mientras tanto), a los 3 s sigue sin ella
+    private suspend fun eval(v: WebView, js: String): Any? = withTimeoutOrNull(3_000) {
+        suspendCancellableCoroutine { k -> v.evaluateJavascript(js) { k.resume(it ?: "null") } }
+    }?.let { runCatching { JSONTokener(it).nextValue() }.getOrNull() }
 
     /** MainActivity: se abrió desde Ajustes para medir. */
     fun onIntent(a: MainActivity, i: Intent) {
