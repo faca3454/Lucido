@@ -1,6 +1,7 @@
 // Herramientas de los APK de prueba. No va en la versión publicada (ver app/build.gradle.kts).
 // La app lo pone antes de block.user.js en cada página:
-// - Mediciones: tareas largas, cuánto tarda cada cambio de página en dibujarse y cada video en arrancar.
+// - Mediciones: tareas largas, cuánto tarda cada cambio de página en dibujarse y cada video en arrancar, y
+//   cuánto video bajó.
 //   La medición automática de Ajustes (DevTools.kt) agrega este resumen (summary) a su informe, y mide
 //   cada paso con start() y result().
 // - Si deslizar para responder no encuentra "Responder", copia la estructura del mensaje (sin el texto).
@@ -64,6 +65,41 @@
   const push = history.pushState;
   history.pushState = function (...a) { const r = push.apply(this, a); auto(); return r; };
   addEventListener('popstate', auto);
+
+  // Video que bajó la página: pedidos que salieron de verdad (block.user.js va después y retiene los suyos
+  // antes de llegar acá) y cuánto pesaban. Más lo que "Videos solo al tocar" dejó esperando, mandó o descartó
+  const data = { n: 0, bytes: 0, held: 0, sent: 0, dropped: 0 };
+  const isVideo = (url) => {
+    try {
+      const u = new URL(url, location.href);
+      return (/(^|\.)(cdninstagram\.com|fbcdn\.net)$/.test(u.hostname) && /\.(mp4|m4v|m4a|webm)$/i.test(u.pathname)) ||
+        /(^|\.)googlevideo\.com$/.test(u.hostname);
+    } catch (e) {
+      return false;
+    }
+  };
+  const weigh = (h) => { const n = parseInt(h, 10); if (n > 0) data.bytes += n; };
+  const fetch0 = window.fetch;
+  window.fetch = function (input) {
+    const p = fetch0.apply(window, arguments);
+    if (isVideo(input instanceof Request ? input.url : String(input))) {
+      data.n++;
+      p.then((r) => weigh(r.headers.get('content-length')), () => {});
+    }
+    return p;
+  };
+  const xvideo = new WeakSet(), xopen = XMLHttpRequest.prototype.open, xsend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    if (isVideo(String(url))) xvideo.add(this); else xvideo.delete(this);
+    return xopen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function () {
+    if (xvideo.has(this)) {
+      data.n++;
+      this.addEventListener('loadend', () => weigh(this.getResponseHeader('content-length')), { once: true });
+    }
+    return xsend.apply(this, arguments);
+  };
 
   let benching = false; // midiendo en esta página: los videos, en silencio
   let wantVideo = null; // paso "abrir un video": desde cuándo y desde qué página (no cuentan las vistas previas de ahí)
@@ -152,7 +188,7 @@
 
   // Resumen de lo medido en esta página (para el informe de la medición automática); null si no hay nada
   const summary = () => {
-    if (!navs.length && !videos.length && !tasks.length) return null;
+    if (!navs.length && !videos.length && !tasks.length && !data.n && !data.held) return null;
     const long = {}; // pantalla → [cantidad, ms en total, ms la más larga]
     for (const [start, ms] of tasks) {
       const k = visits.filter(([t]) => t <= start).pop()[1], t = long[k] || (long[k] = [0, 0, 0]);
@@ -168,6 +204,8 @@
       '  ' + navs.slice(-30).join(' · '),
       `Videos, de play() a playing (ms): ${sorted.length ? `mediana ${sorted[sorted.length >> 1]}, máx ${sorted[sorted.length - 1]} (n=${sorted.length})` : 'ninguno'}`,
       '  ' + videos.slice(-30).join(' '),
+      `Video bajado: ${data.n} pedidos, ${(data.bytes / 1048576).toFixed(1)} MB` +
+        (data.held ? ` · solo al tocar: ${data.held} en espera, ${data.sent} mandados después, ${data.dropped} descartados` : ''),
       ...taps.map((t) => `Toque en foto/video de un chat: ${t.media} · llegó a la página: ${t.reached ? (t.prevented ? 'sí (y alguien lo usó)' : 'sí') : 'no'}` +
         `\n  después: ${t.after || 'sin medir'}\n  otra igual: ${t.twins}\n  cadena: ${t.chain}\n  ${t.card}`),
     ].join('\n');
@@ -209,6 +247,7 @@
       if (what === 'note') trace.push([performance.now(), x]);
       else if (what === 'ready') { if (ready === null) ready = performance.now(); }
       else if (what === 'swipe') swipeFailed(x);
+      else if (what === 'video') data[x]++;
     },
     // Medición automática: empieza a medir lo que hace el paso que sigue (con video, hasta que arranca).
     // Devuelve el id de la página, para saber después si se recargó.

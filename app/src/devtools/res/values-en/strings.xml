@@ -12,4 +12,10 @@
     <string name="dev_bench_done">Measurements copied</string>
     <string name="dev_share">Share</string>
     <string name="dev_copy_again">Copy again</string>
+    <string name="dev_data">Data downloaded</string>
+    <string name="dev_data_summary">To compare \"Tap to play videos\": reset it, use IG Lite for a few minutes and check again.</string>
+    <string name="dev_data_msg">Since %1$s, Lúcido downloaded %2$s MB (IG Lite, YT Lite and the rest of the app).</string>
+    <string name="dev_data_reset">Reset</string>
+    <string name="dev_data_zero">Done: counting from now</string>
+    <string name="dev_data_none">This phone doesn\'t report data per app</string>
 </resources>

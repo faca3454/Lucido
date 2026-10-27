@@ -211,6 +211,49 @@ La app va a ser pública, así que no usamos el modo "propietario del dispositiv
 
 ---
 
+## 7. Pedidos de octubre de 2026
+
+Estado: **acordado**. La tanda A va solo en `block.user.js` (les llega a todos sin reinstalar); la
+tanda B necesita un APK nuevo (1.3.0). Ningún cambio renombra ajustes guardados: los ajustes nuevos
+arrancan con su valor por defecto y el compromiso en curso no se toca.
+
+### 7.1 Anuncios (tanda A; el interruptor, tanda B)
+- No se puede usar un bloqueador hecho: la WebView no lleva extensiones, y los bloqueadores por DNS o
+  de todo el teléfono no ven estos anuncios (vienen de los mismos servidores que los videos y las
+  publicaciones). Se escribe en el script con la receta de uBlock Origin, sin copiar su código (GPL).
+- YouTube: ocultar las tarjetas patrocinadas; borrar `adPlacements`, `playerAds` y `adSlots` de los
+  datos del video antes de que YouTube los lea; si igual aparece un anuncio, silenciarlo y saltarlo.
+- Instagram: ocultar las publicaciones con "Publicidad" / "Sponsored" y saltar las historias
+  patrocinadas.
+- Prendido por defecto (`igBlockAds`, `ytBlockAds`); el interruptor llega con la 1.3.0.
+- Si YouTube cambia la forma de meter anuncios: mirar qué cambió uBlock Origin y copiar la idea.
+
+### 7.2 Historias en "Solo seguidos" (tanda A)
+- Instagram no muestra la fila de historias en `/?variant=following`. Se dibuja una propia arriba
+  del feed, con los datos que usa Instagram para la suya y su mismo aspecto. Si no responde, no hay
+  fila (como antes).
+- "Bloqueado" sigue igual: el inicio vuelve al inbox.
+
+### 7.3 Videos solo al tocar que no gasten datos (tanda A)
+- Antes solo frenaba la reproducción: Instagram igual bajaba los videos con su propio reproductor.
+- `preload="none"` y sin autoplay desde que se crea el video, y los pedidos de video quedan en
+  espera hasta que tocás uno (o abrís un reel o una historia).
+- Para comparar antes y después, los APK de prueba miden los datos que baja la app.
+
+### 7.4 Estadísticas con el ícono escondido (tanda B)
+- Con "Esconder el ícono" el inicio se apaga y no había otro camino a las estadísticas (los widgets
+  tampoco abrían). Caminos nuevos: atajo "Estadísticas" al mantener presionado IG Lite / YT Lite,
+  los widgets abren las estadísticas si el ícono está escondido, una fila en Ajustes y la comparación
+  con antes en la pantalla del compromiso.
+
+### 7.5 Pantalla completa de YouTube como en la app oficial (tanda B)
+- Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
+  entre los dos lados acostados). Video vertical: vertical.
+- Con la rotación del teléfono prendida, acostarlo mirando un video entra solo a pantalla completa y
+  enderezarlo sale. Con la rotación apagada, solo con el botón.
+
+---
+
 ## Orden de trabajo
 
 1. **Reels sin scroll** (punto 1). Solo el script.

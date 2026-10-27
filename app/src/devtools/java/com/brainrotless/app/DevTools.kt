@@ -5,8 +5,11 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.TrafficStats
 import android.os.Build
+import android.os.Process
 import android.os.SystemClock
+import android.text.format.DateUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -28,6 +31,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.json.JSONTokener
+import java.util.Locale
 import kotlin.coroutines.resume
 
 /**
@@ -67,6 +71,32 @@ object DevTools {
                 true
             }
         })
+        cat.addPreference(Preference(c).apply {
+            title = c.getString(R.string.dev_data)
+            summary = c.getString(R.string.dev_data_summary)
+            setOnPreferenceClickListener { showData(c); true }
+        })
+    }
+
+    /**
+     * Datos que bajó la app (las páginas de IG Lite y YT Lite van por la app) desde que se puso en cero, o
+     * desde que se prendió el teléfono: para comparar "Videos solo al tocar" prendido y apagado.
+     */
+    private fun showData(c: Context) {
+        val now = TrafficStats.getUidRxBytes(Process.myUid())
+        if (now < 0) return Toast.makeText(c, R.string.dev_data_none, Toast.LENGTH_LONG).show()
+        val prefs = c.getSharedPreferences("devtools", Context.MODE_PRIVATE)
+        val zero = prefs.getLong("rx", 0)
+        val fromBoot = zero > now // se reinició el teléfono: el contador de Android volvió a cero
+        val since = if (fromBoot || zero == 0L) System.currentTimeMillis() - SystemClock.elapsedRealtime() else prefs.getLong("rx_at", 0)
+        val mb = String.format(Locale.getDefault(), "%.1f", (now - if (fromBoot) 0 else zero) / 1_048_576.0)
+        val at = DateUtils.formatSameDayTime(since, System.currentTimeMillis(), java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+        AlertDialog.Builder(c).setTitle(R.string.dev_data).setMessage(c.getString(R.string.dev_data_msg, at, mb))
+            .setPositiveButton(R.string.dev_data_reset) { _, _ ->
+                prefs.edit().putLong("rx", now).putLong("rx_at", System.currentTimeMillis()).apply()
+                Toast.makeText(c, R.string.dev_data_zero, Toast.LENGTH_LONG).show()
+            }
+            .setNegativeButton(R.string.done, null).show()
     }
 
     /** MainActivity: se abrió desde Ajustes para medir. */

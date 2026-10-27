@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      15
+// @version      16
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -18,7 +18,7 @@
   // --- Config (la app la inyecta desde Ajustes; en Safari/Userscripts usa estos valores) ---
   const DEFAULTS = {
     igFeed: 'normal', igBlockExplore: true, igTapToPlay: false, igReels: false, ytShorts: false,
-    restricted: false, restrictedMsg: '', smooth: false, swipeReply: false,
+    restricted: false, restrictedMsg: '', smooth: false, swipeReply: false, igBlockAds: true, ytBlockAds: true,
   };
   const config = (given) => {
     const c = Object.assign({}, DEFAULTS, given || {});
@@ -50,7 +50,7 @@
     return SMOOTH + (IG
       ? (hidden.length ? `${hidden.join(', ')} { display:none !important; }` : '') +
         (CFG.restricted ? 'a[href="/"], video { display:none !important; }' : '')
-      : CFG.ytShorts ? '' : `
+      : (CFG.ytShorts ? '' : `
         ytm-reel-shelf-renderer, ytm-shorts-lockup-view-model,
         ytm-rich-item-renderer:has(a[href^="/shorts/"]),
         ytm-video-with-context-renderer:has(a[href^="/shorts/"]),
@@ -59,7 +59,19 @@
         ytd-rich-item-renderer:has(a[href^="/shorts/"]),
         ytd-guide-entry-renderer:has(a[title="Shorts"]),
         ytd-mini-guide-entry-renderer[aria-label="Shorts"]
-        { display:none !important; }`);
+        { display:none !important; }`) +
+        // Anuncios entre los videos, en la búsqueda, debajo del reproductor y encima del video (sección 15)
+        (CFG.ytBlockAds ? `
+        ad-slot-renderer, ytm-rich-item-renderer:has(ad-slot-renderer),
+        ytm-promoted-sparkles-web-renderer, ytm-promoted-sparkles-text-search-renderer,
+        ytm-promoted-video-renderer, ytm-companion-ad-renderer, ytm-companion-slot,
+        ytm-brand-video-singleton-renderer, ytm-brand-video-shelf-renderer,
+        ytd-ad-slot-renderer, ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
+        ytd-in-feed-ad-layout-renderer, ytd-promoted-sparkles-web-renderer, ytd-banner-promo-renderer,
+        ytd-statement-banner-renderer, ytd-companion-slot-renderer, ytd-action-companion-ad-renderer,
+        ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"],
+        #masthead-ad, #player-ads, .ytp-ad-overlay-container, .ytp-ad-image-overlay
+        { display:none !important; }` : ''));
   };
   let style = null;
   const addStyle = () => {
@@ -273,19 +285,104 @@
   }
 
   // --- 5. Videos solo al tocar (Instagram, opcional) ---
-  // Los videos no arrancan ni se precargan hasta que los tocás. Los reels e historias
+  // Los videos no arrancan ni se descargan hasta que los tocás. Los reels e historias
   // que abrís arrancan solos: ya tocaste para abrirlos.
   if (IG && CFG.igTapToPlay) {
     const tapped = new WeakSet();
     const badges = new WeakMap();
+    const viewerPage = () => /^\/(reels?|stories)\//.test(location.pathname);
     const inViewer = (v) => {
-      if (/^\/(reels?|stories)\//.test(location.pathname)) return true;
+      if (viewerPage()) return true;
+      if (!v.isConnected) return false; // recién creado: fuera de la página no hay estilos que mirar
       for (let el = v.parentElement; el && el.nodeType === 1; el = el.parentElement) {
         if (getComputedStyle(el).scrollSnapType !== 'none') return true; // visor encima del chat
       }
       return false;
     };
     const allowed = (v) => !(v instanceof HTMLVideoElement) || tapped.has(v) || inViewer(v);
+
+    // Frenar la reproducción no alcanza: el reproductor de Instagram baja los videos por su cuenta (pide
+    // los pedazos al servidor, no el <video>). Esos pedidos pasan mientras se ve un video permitido, en un
+    // reel o una historia, o recién tocaste algo en un chat (los reels que te mandan se abren encima, sin
+    // cambiar la URL). Si no, esperan. Al abrirse pasan los últimos (los de los videos que tenés cerca) y
+    // los de antes se descartan, como si se hubiera cortado la conexión.
+    const playing = new Set(); // audios y videos permitidos que arrancaron
+    let chatTap = -Infinity;
+    const isOpen = () => {
+      for (const m of playing) if (m.paused || m.ended) playing.delete(m);
+      return playing.size > 0 || viewerPage() || performance.now() - chatTap < 3000;
+    };
+    const isVideo = (url) => {
+      try {
+        const u = new URL(url, location.href);
+        return /(^|\.)(cdninstagram\.com|fbcdn\.net)$/.test(u.hostname) && /\.(mp4|m4v|m4a|webm)$/i.test(u.pathname);
+      } catch (e) {
+        return false;
+      }
+    };
+    const KEEP = 4;
+    let held = []; // { send, drop? }, en el orden en que llegaron
+    const hold = (h) => { held.push(h); dev('video', 'held'); };
+    const release = () => {
+      if (!held.length || !isOpen()) return;
+      const all = held;
+      held = [];
+      all.forEach((h, i) => (i >= all.length - KEEP || !h.drop ? h.send() : h.drop()));
+    };
+    const play0 = (m) => { if (!playing.has(m)) { playing.add(m); release(); } };
+
+    const fetch0 = window.fetch;
+    window.fetch = function (input, init) {
+      const url = input instanceof Request ? input.url : String(input);
+      const signal = (init && init.signal) || (input instanceof Request ? input.signal : null);
+      if (isOpen() || !isVideo(url) || (signal && signal.aborted)) return fetch0.apply(window, arguments);
+      const args = arguments;
+      return new Promise((resolve, reject) => {
+        const off = () => { if (signal) signal.removeEventListener('abort', abort); };
+        const h = {
+          send: () => { off(); dev('video', 'sent'); fetch0.apply(window, args).then(resolve, reject); },
+          drop: () => { off(); dev('video', 'dropped'); reject(new TypeError('Failed to fetch')); },
+        };
+        // Instagram ya no lo quiere (pasaste de largo): se olvida
+        const abort = () => { held = held.filter((x) => x !== h); reject(signal.reason || new DOMException('Aborted', 'AbortError')); };
+        if (signal) signal.addEventListener('abort', abort);
+        hold(h);
+      });
+    };
+    const xhr = XMLHttpRequest.prototype, xopen = xhr.open, xsend = xhr.send, xabort = xhr.abort;
+    const xurl = new WeakMap(), xheld = new WeakMap();
+    const forget = (x) => { const h = xheld.get(x); if (h) { xheld.delete(x); held = held.filter((y) => y !== h); } };
+    xhr.open = function (method, url) { forget(this); xurl.set(this, String(url)); return xopen.apply(this, arguments); };
+    xhr.abort = function () { forget(this); return xabort.apply(this, arguments); };
+    xhr.send = function () {
+      if (isOpen() || !isVideo(xurl.get(this) || '')) return xsend.apply(this, arguments);
+      const x = this, args = arguments;
+      const h = { send: () => { xheld.delete(x); dev('video', 'sent'); xsend.apply(x, args); } }; // sin drop: no se puede imitar el corte
+      xheld.set(x, h);
+      hold(h);
+    };
+    route(release); // abriste un reel o una historia
+    addEventListener('click', (e) => {
+      if (!e.isTrusted || !/^\/direct\//.test(location.pathname)) return;
+      chatTap = performance.now();
+      release();
+    }, true);
+
+    // Desde que se crea el video, sin precarga ni arranque solo (React los pone con setAttribute)
+    const prop = (k, off) => {
+      const d = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, k);
+      Object.defineProperty(HTMLMediaElement.prototype, k, { ...d, set(x) { d.set.call(this, allowed(this) ? x : off); } });
+    };
+    prop('preload', 'none');
+    prop('autoplay', false);
+    const setAttr = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (name, value) {
+      if (this instanceof HTMLVideoElement && /^(preload|autoplay)$/i.test(name) && !allowed(this)) {
+        if (/^autoplay$/i.test(name)) return;
+        value = 'none';
+      }
+      return setAttr.call(this, name, value);
+    };
 
     const showBadge = (v) => {
       const parent = v.parentElement;
@@ -304,18 +401,22 @@
 
     const play = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function () {
-      if (allowed(this)) return play.call(this);
+      if (allowed(this)) {
+        const p = play.call(this);
+        play0(this); // después: recién ahí deja de estar en pausa
+        return p;
+      }
       showBadge(this);
       return Promise.reject(new DOMException('Tocá el video para reproducirlo', 'NotAllowedError'));
     };
     // Por si arranca por el atributo autoplay, sin pasar por play()
     addEventListener('play', (e) => {
-      if (allowed(e.target)) { hideBadge(e.target); return; }
+      if (allowed(e.target)) { hideBadge(e.target); play0(e.target); return; }
       e.target.pause();
       showBadge(e.target);
     }, true);
 
-    // Sin precarga: no gasta datos hasta que lo tocás
+    // El ▶ en los videos frenados (y, por las dudas, sin precarga si llegó por otro lado)
     let pending = false;
     new MutationObserver(() => {
       if (pending) return;
@@ -323,7 +424,9 @@
       setTimeout(() => {
         pending = false;
         for (const v of document.getElementsByTagName('video')) {
-          if (v.preload !== 'none' && !allowed(v)) { v.autoplay = false; v.preload = 'none'; showBadge(v); }
+          if (allowed(v)) continue;
+          if (v.preload !== 'none') { v.autoplay = false; v.preload = 'none'; }
+          showBadge(v);
         }
       }, 200);
     }).observe(document, { childList: true, subtree: true }); // document: el <html> puede no existir todavía
@@ -810,4 +913,251 @@
       return false;
     }
   };
+
+  // --- 15. Sin anuncios (YouTube e Instagram; se pueden apagar) ---
+  // YouTube, con la receta de uBlock Origin (sin su código): los anuncios de un video vienen en los datos
+  // del video (adPlacements, playerAds, adSlots) y se borran antes de que el reproductor los lea, lleguen
+  // con la página (ytInitialPlayerResponse) o en un pedido (JSON.parse, Response.json). Si igual aparece
+  // uno, se silencia, se acelera y se toca "Omitir"; al terminar, el video vuelve a como estaba. Los de
+  // entre videos, con CSS (sección 1). Si YouTube cambia la forma: mirar qué cambió uBlock Origin en sus
+  // filtros de youtube.com.
+  if (YT && CFG.ytBlockAds) {
+    const AD_KEYS = ['adPlacements', 'playerAds', 'adSlots'];
+    const strip = (o) => {
+      if (!o || typeof o !== 'object') return;
+      for (const t of [o, o.playerResponse]) {
+        if (t && typeof t === 'object') for (const k of AD_KEYS) if (k in t) delete t[k];
+      }
+    };
+    const prune = (o) => { if (Array.isArray(o)) o.forEach(strip); else strip(o); return o; };
+    const parse = JSON.parse;
+    JSON.parse = function () { return prune(parse.apply(this, arguments)); };
+    const json = Response.prototype.json;
+    Response.prototype.json = function () { return json.apply(this, arguments).then(prune); };
+    let initial;
+    try {
+      Object.defineProperty(window, 'ytInitialPlayerResponse', {
+        configurable: true, get: () => initial, set: (v) => { initial = prune(v); },
+      });
+    } catch (e) {}
+
+    const SKIP = '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, [class*="skip-ad"], [class*="ad-skip"]';
+    const before = new WeakMap(); // sonido y velocidad del video antes del anuncio
+    const skipAd = (e) => {
+      const v = e.target;
+      if (!(v instanceof HTMLVideoElement)) return;
+      const ad = v.closest('.ad-showing, .ad-interrupting');
+      if (!ad) {
+        const b = before.get(v);
+        if (b) { before.delete(v); v.muted = b.muted; v.playbackRate = b.rate; }
+        return;
+      }
+      if (!before.has(v)) { before.set(v, { muted: v.muted, rate: v.playbackRate }); dev('note', 'anuncios: salteé uno de YouTube'); }
+      v.muted = true;
+      v.playbackRate = 16; // sin saltar al final: si el anuncio viene pegado al video, se saltearía el video también
+      const btn = ad.querySelector(SKIP);
+      if (btn) btn.click();
+    };
+    for (const type of ['loadedmetadata', 'playing', 'timeupdate']) addEventListener(type, skipAd, true);
+  }
+
+  // Instagram: las publicaciones con "Publicidad" se ocultan y las historias patrocinadas se saltean. Por el
+  // texto de la etiqueta, que va arriba junto al nombre (como los carteles de "Usá la app", sección 6).
+  if (IG && CFG.igBlockAds) {
+    const AD = /^(publicidad|patrocinado|sponsored|ad|anuncio|publicidade|sponsoris[ée]|sponsorizzato|gesponsert)$/i;
+    // La etiqueta entre los primeros textos de root; puede venir partida en varios elementos chicos
+    const label = (root, max) => {
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n, i = 0; (n = walk.nextNode()) && i < max; i++) {
+        for (let el = n.parentElement, up = 0; el && up < 3 && el !== root; el = el.parentElement, up++) {
+          const t = el.textContent;
+          if (t.length > 40) break;
+          if (AD.test(t.replace(/\s+/g, ' ').trim())) return el;
+        }
+      }
+      return null;
+    };
+    const hidePost = (post) => {
+      if (post.style.display === 'none' || !label(post, 40)) return;
+      post.style.setProperty('display', 'none', 'important');
+      dev('note', 'anuncios: oculté una publicación');
+    };
+
+    // Historia patrocinada: "Siguiente", o un toque en el costado derecho (como un dedo). Hasta 3 intentos
+    const tries = new WeakMap(); // etiqueta → [intentos, último]
+    const skipStory = () => {
+      const el = document.body && label(document.body, 400);
+      const r = el && el.getBoundingClientRect();
+      if (!r || !r.height || r.top > innerHeight * 0.3) return;
+      const [n, last] = tries.get(el) || [0, -Infinity];
+      if (n >= 3 || performance.now() - last < 1500) return;
+      tries.set(el, [n + 1, performance.now()]);
+      dev('note', 'anuncios: salteé una historia patrocinada');
+      const next = [...document.querySelectorAll('[aria-label]')].find((b) =>
+        /^(siguiente|next)$/i.test(b.getAttribute('aria-label').trim()) && b.getBoundingClientRect().height > 0);
+      if (next) return next.click();
+      const x = innerWidth * 0.9, y = innerHeight / 2, target = document.elementFromPoint(x, y);
+      if (!target) return;
+      const at = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y };
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        target.dispatchEvent(type.startsWith('pointer')
+          ? new PointerEvent(type, { ...at, pointerId: 9996, pointerType: 'touch', isPrimary: true })
+          : new MouseEvent(type, at));
+      }
+    };
+
+    // Se mira lo que se agregó, cuando el navegador está libre; en las historias, la parte de arriba
+    let added = [], scheduled = false;
+    const idle = window.requestIdleCallback ? (f) => requestIdleCallback(f, { timeout: 500 }) : (f) => setTimeout(f, 200);
+    const sweep = () => {
+      scheduled = false;
+      const nodes = added;
+      added = [];
+      if (/^\/stories\//.test(location.pathname)) return skipStory();
+      const posts = new Set();
+      for (const n of nodes) {
+        const el = n.nodeType === 1 ? n : n.parentElement;
+        if (!el || !el.isConnected) continue;
+        const post = el.closest('article');
+        if (post) posts.add(post);
+        else if (el.getElementsByTagName) for (const a of el.getElementsByTagName('article')) posts.add(a);
+      }
+      for (const p of posts) hidePost(p);
+    };
+    new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type === 'characterData') added.push(r.target);
+        else for (const n of r.addedNodes) added.push(n);
+      }
+      if (!scheduled && added.length) { scheduled = true; idle(sweep); }
+    }).observe(document, { childList: true, subtree: true, characterData: true }); // document: el <html> puede no existir todavía
+  }
+
+  // --- 16. Historias arriba del feed de seguidos (Instagram) ---
+  // Instagram no muestra su fila de historias en /?variant=following. Se dibuja una igual, con los datos que
+  // usa Instagram para la suya (las de la gente que seguís, sin las silenciadas): tocar a alguien abre sus
+  // historias. Si Instagram no contesta, no hay fila, como antes. Se trae de nuevo al volver al feed, cada
+  // un minuto como mucho.
+  if (IG && CFG.igFeed === 'following') {
+    const onFeed = () => location.pathname === '/' && !CFG.restricted;
+    let tray = null, fetchedAt = -Infinity, loading = false;
+    let row = null, shown = false; // la fila armada y si ya apareció (el fundido, solo la primera vez)
+
+    const load = () => {
+      if (loading || performance.now() - fetchedAt < 60000) return;
+      loading = true;
+      fetch('/api/v1/feed/reels_tray/', {
+        credentials: 'include', headers: { 'X-IG-App-ID': '936619743392459', 'X-Requested-With': 'XMLHttpRequest' },
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          fetchedAt = performance.now();
+          tray = ((j && j.tray) || []).filter((t) => t && t.user && t.user.username && !t.muted).map((t) => ({
+            user: t.user.username, pic: t.user.profile_pic_url || '',
+            seen: t.seen >= t.latest_reel_media, close: !!t.has_besties_media,
+          }));
+          if (row) { row.remove(); row = null; }
+          draw();
+        })
+        .catch(() => {})
+        .finally(() => { loading = false; });
+    };
+
+    // Aro con los colores de Instagram (gris si ya la viste, verde si es de mejores amigos). El hueco entre
+    // el aro y la foto es del color de la página, que se mira al armarla (claro u oscuro)
+    const CSS = `
+      .lucido-st { display:flex; gap:12px; overflow-x:auto; overflow-y:hidden; padding:10px 12px 12px;
+        scrollbar-width:none; overscroll-behavior-x:contain; -webkit-tap-highlight-color:transparent;
+        border-bottom:1px solid rgba(128,128,128,.22); }
+      .lucido-st::-webkit-scrollbar { display:none; }
+      .lucido-st a { flex:0 0 auto; width:66px; display:flex; flex-direction:column; align-items:center; gap:6px;
+        color:inherit; text-decoration:none; touch-action:manipulation; user-select:none; -webkit-user-select:none;
+        -webkit-touch-callout:none; }
+      .lucido-st .ring { width:66px; height:66px; padding:2px; box-sizing:border-box; border-radius:50%;
+        background:linear-gradient(45deg,#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5);
+        transition:transform 120ms cubic-bezier(.23,1,.32,1), opacity 120ms; }
+      .lucido-st .seen .ring { padding:1px; background:rgba(128,128,128,.45); }
+      .lucido-st .close .ring { background:#1cbf4e; }
+      .lucido-st img { display:block; width:100%; height:100%; box-sizing:border-box; border-radius:50%;
+        border:3px solid var(--lucido-gap,#fff); object-fit:cover; background:rgba(128,128,128,.2); }
+      .lucido-st .seen img { border-width:4px; }
+      .lucido-st a:active .ring { transform:scale(.96); }
+      .lucido-st span { max-width:66px; font-size:12px; line-height:16px; overflow:hidden; text-overflow:ellipsis;
+        white-space:nowrap; }
+      @media (prefers-reduced-motion: reduce) { .lucido-st a:active .ring { transform:none; opacity:.7; } }`;
+    let styled = false;
+    const pageColor = (el) => {
+      for (; el && el.nodeType === 1; el = el.parentElement) {
+        const c = getComputedStyle(el).backgroundColor;
+        if (c && !/^(transparent|rgba\(\d+, \d+, \d+, 0\))$/.test(c)) return c;
+      }
+      return matchMedia('(prefers-color-scheme: dark)').matches ? '#000' : '#fff';
+    };
+    const build = () => {
+      const ES = /^es/i.test(document.documentElement.lang || navigator.language || ''); // al cargar, todavía no hay <html>
+      const r = document.createElement('div');
+      r.className = 'lucido-st';
+      r.setAttribute('aria-label', ES ? 'Historias' : 'Stories');
+      for (const t of tray) {
+        const a = document.createElement('a');
+        a.href = '/stories/' + encodeURIComponent(t.user) + '/';
+        a.className = (t.seen ? 'seen' : '') + (t.close && !t.seen ? ' close' : '');
+        a.setAttribute('aria-label', ES ? `Historia de ${t.user}` : `${t.user}'s story`);
+        const ring = document.createElement('div');
+        ring.className = 'ring';
+        const img = document.createElement('img');
+        img.alt = '';
+        img.decoding = 'async';
+        img.referrerPolicy = 'no-referrer';
+        img.src = t.pic;
+        ring.appendChild(img);
+        const name = document.createElement('span');
+        name.textContent = t.user;
+        a.append(ring, name);
+        // Dentro del sitio, como el botón atrás (sin recargar). Pasa a vista cuando ya la tapan las historias
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          t.seen = true;
+          navigate(a.getAttribute('href'), false);
+          setTimeout(() => { a.className = 'seen'; }, 400);
+        });
+        r.appendChild(a);
+      }
+      return r;
+    };
+    const draw = () => {
+      if (!onFeed() || !tray || !tray.length) return;
+      const first = document.querySelector('main article') || document.querySelector('article');
+      if (!first) return;
+      if (row && row.isConnected && row.nextElementSibling === first) return;
+      if (!styled) {
+        const s = document.createElement('style');
+        s.textContent = CSS;
+        (document.head || document.documentElement).appendChild(s);
+        styled = true;
+      }
+      if (!row) row = build();
+      first.parentElement.insertBefore(row, first);
+      row.style.setProperty('--lucido-gap', pageColor(row.parentElement));
+      if (!shown) {
+        shown = true;
+        row.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: 'cubic-bezier(.23,1,.32,1)' });
+      }
+    };
+
+    // Mientras estás en el feed: se vuelve a poner si Instagram rearma la lista (o recién llegan las publicaciones)
+    let pending = false;
+    const watch = new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => { pending = false; draw(); });
+    });
+    route(() => {
+      watch.disconnect();
+      if (!onFeed()) return;
+      watch.observe(document, { childList: true, subtree: true });
+      load();
+      draw();
+    });
+  }
 })();

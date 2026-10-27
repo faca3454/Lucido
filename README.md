@@ -21,8 +21,9 @@ Lúcido es una app para Android que abre Instagram y YouTube sin el scroll infin
 
 **Sin scroll infinito**
 - Los reels y shorts que te mandan tus amigos se ven, pero no podés deslizar al siguiente.
-- El feed de Instagram, a tu elección: normal, solo las cuentas que seguís (en orden, y se termina) o bloqueado.
-- Explorar bloqueado y sin carteles de "Usá la app". Si querés, los videos arrancan solo cuando los tocás (ahorra datos).
+- El feed de Instagram, a tu elección: normal, solo las cuentas que seguís (en orden, se termina y con las historias arriba) o bloqueado.
+- Explorar bloqueado y sin carteles de "Usá la app". Si querés, los videos arrancan y se descargan solo cuando los tocás (ahorra datos).
+- Sin anuncios: YouTube sin los de los videos ni los de entre videos, e Instagram sin publicaciones ni historias patrocinadas.
 
 **Modo dormir y modo foco**
 - **De noche**, en tu horario (puede ser distinto cada día): Instagram queda solo para mensajes, YouTube se bloquea y, si querés, también los navegadores. Te avisa unos minutos antes.
