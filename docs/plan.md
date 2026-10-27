@@ -246,11 +246,25 @@ arrancan con su valor por defecto y el compromiso en curso no se toca.
   los widgets abren las estadísticas si el ícono está escondido, una fila en Ajustes y la comparación
   con antes en la pantalla del compromiso.
 
-### 7.5 Pantalla completa de YouTube como en la app oficial (tanda B)
+**Primera prueba en el teléfono (@version 16):** YouTube sin anuncios ✅. Instagram: ocultar la
+publicación con `display:none` cortaba la carga del resto del feed, y las historias patrocinadas no se
+salteaban (probablemente la etiqueta quedaba después de los primeros 400 textos de la página). Ahorro de datos: 8 MB
+en 5 s. Arreglos en @version 17: la publicación se achica a 1 px sin salir de la página (y nunca un
+`<article>` con otros adentro o más alto que dos pantallas); la etiqueta de las historias se busca en
+toda la página, a la vista y arriba, y se avanza con "Siguiente", la flecha o un toque (también
+táctil); los videos de los carruseles ya no cuentan como "visor" (podían abrir todos los pedidos); al tocar
+salen 2 pedidos y no 4, y mientras ves uno el comienzo de los otros (`bytestart=0`) sigue esperando.
+El informe de "Medir" suma lo que hizo el script en cada página.
+
+### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
   entre los dos lados acostados). Video vertical: vertical.
 - Con la rotación del teléfono prendida, acostarlo mirando un video entra solo a pantalla completa y
   enderezarlo sale. Con la rotación apagada, solo con el botón.
+- Hecho: la del botón queda en `sensorLandscape` (o vertical si el video lo es). La de acostar el
+  teléfono no es la del navegador (esa solo se puede pedir con un toque): el script estira el
+  reproductor a toda la pantalla (`__lucidoTheater`) y la app esconde las barras; sale al enderezarlo,
+  con atrás o al irse del video.
 
 ---
 

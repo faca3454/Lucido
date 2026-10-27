@@ -188,12 +188,14 @@
 
   // Resumen de lo medido en esta página (para el informe de la medición automática); null si no hay nada
   const summary = () => {
-    if (!navs.length && !videos.length && !tasks.length && !data.n && !data.held) return null;
+    if (!navs.length && !videos.length && !tasks.length && !data.n && !data.held && !trace.length) return null;
     const long = {}; // pantalla → [cantidad, ms en total, ms la más larga]
     for (const [start, ms] of tasks) {
       const k = visits.filter(([t]) => t <= start).pop()[1], t = long[k] || (long[k] = [0, 0, 0]);
       t[0]++; t[1] += ms; t[2] = Math.max(t[2], ms);
     }
+    const notes = {}; // lo que hizo block.user.js por su cuenta, con cuántas veces
+    for (const [, w] of trace) notes[w] = (notes[w] || 0) + 1;
     const sorted = [...videos].sort((a, b) => a - b);
     const chrome = (navigator.userAgent.match(/Chrome\/[\d.]+/) || ['?'])[0];
     return [
@@ -206,6 +208,7 @@
       '  ' + videos.slice(-30).join(' '),
       `Video bajado: ${data.n} pedidos, ${(data.bytes / 1048576).toFixed(1)} MB` +
         (data.held ? ` · solo al tocar: ${data.held} en espera, ${data.sent} mandados después, ${data.dropped} descartados` : ''),
+      ...(trace.length ? ['Lo que hizo el script (veces):', ...Object.entries(notes).slice(-20).map(([w, n]) => `  ${w}: ${n}`)] : []),
       ...taps.map((t) => `Toque en foto/video de un chat: ${t.media} · llegó a la página: ${t.reached ? (t.prevented ? 'sí (y alguien lo usó)' : 'sí') : 'no'}` +
         `\n  después: ${t.after || 'sin medir'}\n  otra igual: ${t.twins}\n  cadena: ${t.chain}\n  ${t.card}`),
     ].join('\n');

@@ -48,6 +48,7 @@ Lúcido es una app para Android que abre Instagram y YouTube sin el scroll infin
 - Vuelven al instante a donde estabas, y las notificaciones abren el chat directo.
 - Los links de afuera se abren encima, sin salir. Fotos desde la galería, audios con el micrófono y la pantalla prendida mientras ves un video.
 - Deslizar para responder en los chats.
+- Videos de YouTube en pantalla completa como en la app oficial: acostados aunque tengas el teléfono derecho y, con la rotación prendida, acostar el teléfono los pone en pantalla completa.
 
 **Y además**
 - Aviso cuando llevás mucho rato seguido.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      16
+// @version      17
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -291,11 +291,13 @@
     const tapped = new WeakSet();
     const badges = new WeakMap();
     const viewerPage = () => /^\/(reels?|stories)\//.test(location.pathname);
+    // Un reel que te mandan se abre encima del chat, a veces sin cambiar la URL: se lo reconoce porque pasa
+    // de un video a otro deslizando para arriba. Los carruseles del feed se deslizan de costado: no cuentan
     const inViewer = (v) => {
       if (viewerPage()) return true;
-      if (!v.isConnected) return false; // recién creado: fuera de la página no hay estilos que mirar
+      if (!v.isConnected || !/^\/direct\//.test(location.pathname)) return false;
       for (let el = v.parentElement; el && el.nodeType === 1; el = el.parentElement) {
-        if (getComputedStyle(el).scrollSnapType !== 'none') return true; // visor encima del chat
+        if (/^(y|block|both)/.test(getComputedStyle(el).scrollSnapType)) return true;
       }
       return false;
     };
@@ -306,11 +308,15 @@
     // reel o una historia, o recién tocaste algo en un chat (los reels que te mandan se abren encima, sin
     // cambiar la URL). Si no, esperan. Al abrirse pasan los últimos (los de los videos que tenés cerca) y
     // los de antes se descartan, como si se hubiera cortado la conexión.
+    // Mientras ves el que tocaste, el comienzo de los otros (bytestart=0: Instagram los adelanta por si bajás)
+    // sigue esperando; los pedazos que siguen del tuyo pasan
     const playing = new Set(); // audios y videos permitidos que arrancaron
-    let chatTap = -Infinity;
-    const isOpen = () => {
+    let chatTap = -Infinity, tapAt = -Infinity;
+    const isOpen = (url) => {
+      if (viewerPage() || (/^\/direct\//.test(location.pathname) && performance.now() - chatTap < 3000)) return true;
       for (const m of playing) if (m.paused || m.ended) playing.delete(m);
-      return playing.size > 0 || viewerPage() || performance.now() - chatTap < 3000;
+      if (!playing.size) return false;
+      return !(url && /[?&]bytestart=0(&|$)/.test(url) && performance.now() - tapAt > 2000);
     };
     const isVideo = (url) => {
       try {
@@ -320,22 +326,27 @@
         return false;
       }
     };
-    const KEEP = 4;
+    const KEEP = 2;
     let held = []; // { send, drop? }, en el orden en que llegaron
     const hold = (h) => { held.push(h); dev('video', 'held'); };
-    const release = () => {
+    const release = (why) => {
       if (!held.length || !isOpen()) return;
       const all = held;
       held = [];
+      dev('note', `videos solo al tocar: salieron los pedidos (${why})`);
       all.forEach((h, i) => (i >= all.length - KEEP || !h.drop ? h.send() : h.drop()));
     };
-    const play0 = (m) => { if (!playing.has(m)) { playing.add(m); release(); } };
+    const play0 = (m) => {
+      if (playing.has(m)) return;
+      playing.add(m);
+      release(!(m instanceof HTMLVideoElement) ? 'un audio' : tapped.has(m) ? 'tocaste un video' : 'un reel o una historia');
+    };
 
     const fetch0 = window.fetch;
     window.fetch = function (input, init) {
       const url = input instanceof Request ? input.url : String(input);
       const signal = (init && init.signal) || (input instanceof Request ? input.signal : null);
-      if (isOpen() || !isVideo(url) || (signal && signal.aborted)) return fetch0.apply(window, arguments);
+      if (isOpen(url) || !isVideo(url) || (signal && signal.aborted)) return fetch0.apply(window, arguments);
       const args = arguments;
       return new Promise((resolve, reject) => {
         const off = () => { if (signal) signal.removeEventListener('abort', abort); };
@@ -355,17 +366,18 @@
     xhr.open = function (method, url) { forget(this); xurl.set(this, String(url)); return xopen.apply(this, arguments); };
     xhr.abort = function () { forget(this); return xabort.apply(this, arguments); };
     xhr.send = function () {
-      if (isOpen() || !isVideo(xurl.get(this) || '')) return xsend.apply(this, arguments);
+      const url = xurl.get(this) || '';
+      if (isOpen(url) || !isVideo(url)) return xsend.apply(this, arguments);
       const x = this, args = arguments;
       const h = { send: () => { xheld.delete(x); dev('video', 'sent'); xsend.apply(x, args); } }; // sin drop: no se puede imitar el corte
       xheld.set(x, h);
       hold(h);
     };
-    route(release); // abriste un reel o una historia
+    route(() => release('abriste un reel o una historia'));
     addEventListener('click', (e) => {
       if (!e.isTrusted || !/^\/direct\//.test(location.pathname)) return;
       chatTap = performance.now();
-      release();
+      release('tocaste algo en un chat');
     }, true);
 
     // Desde que se crea el video, sin precarga ni arranque solo (React los pone con setAttribute)
@@ -442,6 +454,7 @@
         e.stopPropagation();
         dev('note', 'videos al tocar: frené el toque y reproduje el video');
         tapped.add(v);
+        tapAt = performance.now();
         v.preload = 'auto';
         v.play().catch(() => {});
         return;
@@ -977,33 +990,85 @@
       }
       return null;
     };
+    // Una publicación lleva la etiqueta arriba, junto al nombre. Un <article> con otros adentro, o más alto que
+    // dos pantallas, es una lista: ocultarlo se llevaría el feed entero
+    const isAd = (post) => {
+      if (post.querySelector('article')) return false;
+      const box = post.getBoundingClientRect();
+      if (box.height > innerHeight * 2.5) return false;
+      const el = label(post, 40);
+      return !!el && el.getBoundingClientRect().top - box.top < 120;
+    };
+    // Se achica a nada sin sacarla de la página: si una publicación desaparece (display:none), Instagram deja
+    // de cargar las que siguen
+    let styled = false;
     const hidePost = (post) => {
-      if (post.style.display === 'none' || !label(post, 40)) return;
-      post.style.setProperty('display', 'none', 'important');
+      if (post.hasAttribute('data-lucido-ad') || !isAd(post)) return;
+      if (!styled) {
+        styled = true;
+        const s = document.createElement('style');
+        s.textContent = 'article[data-lucido-ad] { height:1px !important; min-height:0 !important; margin:0 !important; ' +
+          'padding:0 !important; border:0 !important; overflow:hidden !important; visibility:hidden !important; }';
+        (document.head || document.documentElement).appendChild(s);
+      }
+      post.setAttribute('data-lucido-ad', '');
       dev('note', 'anuncios: oculté una publicación');
     };
 
-    // Historia patrocinada: "Siguiente", o un toque en el costado derecho (como un dedo). Hasta 3 intentos
-    const tries = new WeakMap(); // etiqueta → [intentos, último]
-    const skipStory = () => {
-      const el = document.body && label(document.body, 400);
-      const r = el && el.getBoundingClientRect();
-      if (!r || !r.height || r.top > innerHeight * 0.3) return;
-      const [n, last] = tries.get(el) || [0, -Infinity];
-      if (n >= 3 || performance.now() - last < 1500) return;
-      tries.set(el, [n + 1, performance.now()]);
-      dev('note', 'anuncios: salteé una historia patrocinada');
-      const next = [...document.querySelectorAll('[aria-label]')].find((b) =>
-        /^(siguiente|next)$/i.test(b.getAttribute('aria-label').trim()) && b.getBoundingClientRect().height > 0);
-      if (next) return next.click();
+    // Historia patrocinada: la etiqueta arriba y a la vista, en cualquier parte de la página (debajo de las
+    // historias puede seguir el feed, con cientos de textos antes)
+    const storyLabel = () => {
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n; (n = walk.nextNode());) {
+        if (n.data.length > 40) continue;
+        for (let el = n.parentElement, up = 0; el && up < 3; el = el.parentElement, up++) {
+          const t = el.textContent;
+          if (t.length > 40) break;
+          if (!AD.test(t.replace(/\s+/g, ' ').trim())) continue;
+          const r = el.getBoundingClientRect();
+          const seen = !el.checkVisibility || el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
+          if (r.height > 4 && r.top >= 0 && r.top < innerHeight * 0.3 && seen) return el;
+          break;
+        }
+      }
+      return null;
+    };
+    // Se avanza a la que sigue: "Siguiente" si está (si no, un toque en el costado derecho, como un dedo:
+    // táctil, puntero y click); al segundo intento, la flecha del teclado; al tercero, el toque
+    const tapRight = () => {
       const x = innerWidth * 0.9, y = innerHeight / 2, target = document.elementFromPoint(x, y);
       if (!target) return;
       const at = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y };
-      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-        target.dispatchEvent(type.startsWith('pointer')
-          ? new PointerEvent(type, { ...at, pointerId: 9996, pointerType: 'touch', isPrimary: true })
-          : new MouseEvent(type, at));
+      const touch = typeof Touch === 'function' && new Touch({ identifier: 9995, target, clientX: x, clientY: y, pageX: x, pageY: y });
+      for (const type of ['pointerdown', 'touchstart', 'pointerup', 'touchend', 'mousedown', 'mouseup', 'click']) {
+        if (type.startsWith('touch')) {
+          if (!touch) continue;
+          const now = type === 'touchstart' ? [touch] : [];
+          target.dispatchEvent(new TouchEvent(type, { ...at, touches: now, targetTouches: now, changedTouches: [touch] }));
+        } else {
+          target.dispatchEvent(type.startsWith('pointer')
+            ? new PointerEvent(type, { ...at, pointerId: 9996, pointerType: 'touch', isPrimary: true })
+            : new MouseEvent(type, at));
+        }
       }
+    };
+    const tries = new WeakMap(); // etiqueta → [intentos, último]
+    const skipStory = () => {
+      const el = document.body && storyLabel();
+      if (!el) return;
+      const [n, last] = tries.get(el) || [0, -Infinity];
+      if (n >= 3 || performance.now() - last < 1500) return;
+      tries.set(el, [n + 1, performance.now()]);
+      dev('note', `anuncios: salteé una historia patrocinada (intento ${n + 1})`);
+      const next = [...document.querySelectorAll('[aria-label]')].find((b) =>
+        /^(siguiente|next)$/i.test(b.getAttribute('aria-label').trim()) && b.getBoundingClientRect().height > 0);
+      if (n === 0 && next) next.click();
+      else if (n === 1) {
+        (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown',
+          { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, which: 39, bubbles: true, cancelable: true }));
+      } else tapRight();
+      // Si no cambió nada en la página, igual se vuelve a mirar
+      setTimeout(() => { if (/^\/stories\//.test(location.pathname)) skipStory(); }, 1600);
     };
 
     // Se mira lo que se agregó, cuando el navegador está libre; en las historias, la parte de arriba
@@ -1159,5 +1224,36 @@
       load();
       draw();
     });
+  }
+
+  // --- 17. Acostar el teléfono mirando un video: pantalla completa (YouTube) ---
+  // Con la rotación del teléfono prendida, la app llama a __lucidoTheater(true) al girar a horizontal en un
+  // video, y (false) al volver a vertical. El reproductor ocupa toda la pantalla con sus controles; no es la
+  // pantalla completa del navegador porque esa solo se puede pedir con un toque. Devuelve false si no hay video.
+  if (YT) {
+    const FULL = `
+      html.lucido-full, html.lucido-full body { overflow:hidden !important; }
+      html.lucido-full #player-container-id { position:fixed !important; inset:0 !important; width:100vw !important;
+        height:100vh !important; max-height:none !important; margin:0 !important; z-index:2147483647 !important;
+        background:#000 !important; transform:none !important; }
+      html.lucido-full #player-container-id #player, html.lucido-full #movie_player, html.lucido-full .html5-video-container {
+        width:100% !important; height:100% !important; max-height:none !important; padding:0 !important; }
+      html.lucido-full #movie_player video { width:100% !important; height:100% !important; left:0 !important;
+        top:0 !important; object-fit:contain !important; }`;
+    let fullStyle = null;
+    window.__lucidoTheater = (on) => {
+      const html = document.documentElement;
+      if (on && !(/^\/watch/.test(location.pathname) && document.querySelector('#player-container-id video'))) return false;
+      if (on && !fullStyle) {
+        fullStyle = document.createElement('style');
+        fullStyle.textContent = FULL;
+        (document.head || html).appendChild(fullStyle);
+      }
+      html.classList.toggle('lucido-full', on);
+      dispatchEvent(new Event('resize')); // que el reproductor se acomode al tamaño nuevo
+      return true;
+    };
+    // Otro video sí, otra página no: si se va del video, sale (la app se entera por la URL)
+    route(() => { if (!/^\/watch/.test(location.pathname)) document.documentElement && document.documentElement.classList.remove('lucido-full'); });
   }
 })();
