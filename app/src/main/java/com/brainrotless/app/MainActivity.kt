@@ -457,9 +457,10 @@ class MainActivity : ComponentActivity() {
             root.addView(view, FrameLayout.LayoutParams(MATCH, MATCH))
             content.visibility = View.GONE
             setBarsHidden(true)
-            // Como la app de YouTube: un video horizontal queda acostado aunque el teléfono esté vertical (gira
-            // solo entre los dos lados acostados) y uno vertical, vertical
-            web.evaluateJavascript(VIDEO_SHAPE) { shape ->
+            // YouTube, como su app: un video horizontal queda acostado aunque el teléfono esté vertical (gira
+            // solo entre los dos lados acostados) y uno vertical, vertical. Instagram (las historias se abren en
+            // pantalla completa) gira como el resto de la app
+            if (onYouTube) web.evaluateJavascript(VIDEO_SHAPE) { shape ->
                 if (fullscreenView !== view) return@evaluateJavascript
                 requestedOrientation = if (shape == "\"v\"") ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE

@@ -256,6 +256,20 @@ táctil); los videos de los carruseles ya no cuentan como "visor" (podían abrir
 salen 2 pedidos y no 4, y mientras ves uno el comienzo de los otros (`bytestart=0`) sigue esperando.
 El informe de "Medir" suma lo que hizo el script en cada página.
 
+**Segunda prueba (@version 17), con video:** el ahorro de datos retiene casi todo (685 pedidos en espera,
+466 descartados; lo que salió sería de las historias, que se ven a propósito). En "Solo seguidos" el feed
+saltaba: la fila de historias se volvía a poner antes de la "primera" publicación, y al bajar Instagram
+saca las de arriba (quedaba en el medio). Al abrir una historia (foto) la pantalla giraba a horizontal: la
+regla nueva de pantalla completa era para YouTube. Al salir de una historia, la página se recargaba
+entera: lo más probable, Instagram volvía al inicio dentro del sitio y el script lo mandaba a
+"Seguidos" recargando.
+Arreglos en @version 18: la fila va arriba de la lista y no se mueve; volver al inicio pasa a "Seguidos"
+dentro del sitio; al terminar las historias de alguien abiertas desde la fila siguen las de la próxima
+persona sin ver (no si las cerraste con la X, deslizando para abajo o con atrás); la rotación de la
+pantalla completa, solo en YouTube. "Datos bajados" (APK de prueba) reemplaza a "Medir" para estas
+pruebas: MB de la app y, por página, cuánto bajó por tipo (imágenes, video, código), los pedidos de video
+y lo que hizo el script, aunque la página se recargue.
+
 ### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
   entre los dos lados acostados). Video vertical: vertical.

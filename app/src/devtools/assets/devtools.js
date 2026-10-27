@@ -75,12 +75,11 @@
   try { saved = JSON.parse(sessionStorage.getItem(KEY)) || {}; } catch (e) {}
   const data = Object.assign({ n: 0, bytes: 0, held: 0, sent: 0, dropped: 0 }, saved.data);
   const notes = Object.assign({}, saved.notes);
+  const bytes = Object.assign({ img: 0, video: 0, js: 0, otros: 0 }, saved.bytes); // todo lo que bajó, por tipo
   let saving = 0;
-  const save = () => {
-    clearTimeout(saving);
-    saving = setTimeout(() => { try { sessionStorage.setItem(KEY, JSON.stringify({ data, notes })); } catch (e) {} }, 300);
-  };
-  addEventListener('pagehide', () => { try { sessionStorage.setItem(KEY, JSON.stringify({ data, notes })); } catch (e) {} });
+  const store = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ data, notes, bytes })); } catch (e) {} };
+  const save = () => { clearTimeout(saving); saving = setTimeout(store, 300); };
+  addEventListener('pagehide', store);
   const isVideo = (url) => {
     try {
       const u = new URL(url, location.href);
@@ -91,6 +90,17 @@
     }
   };
   const weigh = (h) => { const n = parseInt(h, 10); if (n > 0) { data.bytes += n; save(); } };
+  // Todo lo que bajó la página, por tipo: Instagram y YouTube dejan ver el tamaño (Timing-Allow-Origin). No
+  // cuenta lo que pide un <video> por su cuenta (sin fetch), ni lo que vino de la caché
+  const kind = (e) => isVideo(e.name) ? 'video'
+    : e.initiatorType === 'img' || /\.(jpe?g|png|webp|gif|heic|avif)(\?|$)/i.test(e.name) ? 'img'
+      : e.initiatorType === 'script' || /\.js(\?|$)/i.test(e.name) ? 'js' : 'otros';
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) if (e.transferSize > 0) bytes[kind(e)] += e.transferSize;
+      save();
+    }).observe({ type: 'resource', buffered: true });
+  } catch (e) {}
   const fetch0 = window.fetch;
   window.fetch = function (input) {
     const p = fetch0.apply(window, arguments);
@@ -205,8 +215,11 @@
     const all = Object.entries(notes);
     return all.length ? ['Lo que hizo el script (veces):', ...all.slice(-25).map(([w, n]) => `  ${w}: ${n}`)] : [];
   };
-  const videoLine = () => `Video bajado: ${data.n} pedidos, ${(data.bytes / 1048576).toFixed(1)} MB` +
+  const mb = (n) => (n / 1048576).toFixed(1);
+  const videoLine = () => `Video bajado: ${data.n} pedidos, ${mb(data.bytes)} MB` +
     (data.held ? ` · solo al tocar: ${data.held} en espera, ${data.sent} mandados después, ${data.dropped} descartados` : '');
+  const bytesLine = () => `Bajó ${mb(bytes.img + bytes.video + bytes.js + bytes.otros)} MB: imágenes ${mb(bytes.img)}, ` +
+    `video ${mb(bytes.video)}, código ${mb(bytes.js)}, otros ${mb(bytes.otros)}`;
 
   // Resumen de lo medido en esta página (para el informe de la medición automática); null si no hay nada
   const summary = () => {
@@ -304,12 +317,13 @@
     summary,
     // Para "Datos bajados": video y lo que hizo el script desde que se puso en cero (null si nada)
     report() {
-      if (!data.n && !data.held && !Object.keys(notes).length) return null;
+      if (!data.n && !data.held && !Object.keys(notes).length && !(bytes.img + bytes.video + bytes.js + bytes.otros)) return null;
       const name = /instagram/.test(location.hostname) ? 'Instagram' : /youtube/.test(location.hostname) ? 'YouTube' : location.hostname;
-      return [name, videoLine(), ...script()].join('\n');
+      return [name, bytesLine(), videoLine(), ...script()].join('\n');
     },
     reset() {
       for (const k of Object.keys(data)) data[k] = 0;
+      for (const k of Object.keys(bytes)) bytes[k] = 0;
       for (const k of Object.keys(notes)) delete notes[k];
       try { sessionStorage.removeItem(KEY); } catch (e) {}
     },
