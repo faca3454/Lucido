@@ -229,9 +229,16 @@ arrancan con su valor por defecto y el compromiso en curso no se toca.
 - Si YouTube cambia la forma de meter anuncios: mirar qué cambió uBlock Origin y copiar la idea.
 
 ### 7.2 Historias en "Solo seguidos" (tanda A)
-- Instagram no muestra la fila de historias en `/?variant=following`. Se dibuja una propia arriba
-  del feed, con los datos que usa Instagram para la suya y su mismo aspecto. Si no responde, no hay
-  fila (como antes).
+- Instagram no muestra la fila de historias en `/?variant=following`. Primero se dibujó una propia
+  arriba de ese feed (con los datos de la de Instagram), pero sus historias no tenían la fila de
+  Instagram detrás: al terminar cada persona salía al inicio y había cortes y recargas. No se puede
+  abrir Instagram dentro de un marco (`X-Frame-Options: DENY`).
+- **Decidido después de la cuarta prueba (@version 20):** "Solo seguidos" pasa a ser el inicio normal
+  de Instagram (su fila y su visor de historias, tal cual) sin lo que no es de cuentas que seguís: las
+  publicaciones con "Seguir" o "Sugerencias para ti" arriba y los carruseles de sugerencias se achican a
+  1 px; desde "Estás al día" todo lo que sigue desaparece (`display:none`, para que Instagram deje de
+  cargar sugerencias) y ahí termina. El orden es el de Instagram, no estrictamente cronológico. El
+  ajuste guardado sigue siendo `ig_feed = following`.
 - "Bloqueado" sigue igual: el inicio vuelve al inbox.
 
 ### 7.3 Videos solo al tocar que no gasten datos (tanda A)
@@ -278,6 +285,9 @@ de feed. Arreglos en @version 19: si Instagram va a "/" en "Solo seguidos", va d
 `?variant=following` (así arma ese feed); si a los 1,5 s se ve un feed sin el título "Seguidos", recarga en
 seguidos (una vez cada 30 s como mucho, y nunca sin publicaciones a la vista, como en el login); la fila
 propia solo se dibuja con el feed de seguidos a la vista.
+
+**Cuarta prueba (@version 19):** pasa a la persona que sigue, pero entre una y otra se ve un instante el
+inicio normal, y al final recarga: no es la experiencia del feed normal. Se cambia el enfoque (ver 7.2).
 
 ### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
