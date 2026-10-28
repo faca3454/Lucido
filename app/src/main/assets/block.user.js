@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      18
+// @version      19
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -181,21 +181,42 @@
   };
 
   // --- 3. Guardia de URL (respaldo; no depende del DOM) ---
-  // Al feed de seguidos. Con la página andando (Instagram volvió al inicio dentro del sitio, por ejemplo al
-  // terminar unas historias), dentro del sitio, como tocar Inicio, sin recargar: si en 1 s lo que estaba en
-  // pantalla sigue ahí, recién ahí se carga. Si recién empieza a cargar, cargándolo directo
+  // Feed de seguidos. Se reconoce por su título arriba ("Seguidos", con la flecha para volver): el normal
+  // dice "Instagram". Instagram puede cambiar la URL sin cambiar de feed, así que se mira lo que se ve
   const FOLLOWING = '/?variant=following';
+  const followingShown = () => {
+    if (!document.body) return false;
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n; (n = walk.nextNode());) {
+      if (n.data.length > 12 || !/^(seguidos|following|seguindo)$/i.test(n.data.trim())) continue;
+      const r = n.parentElement.getBoundingClientRect();
+      if (r.height && r.top < 120) return true;
+    }
+    return false;
+  };
+  // Si en 1,5 s se ve un feed que no es el de seguidos, se carga (recargando: como antes, pero nunca el
+  // normal). Sin publicaciones (el login, por ejemplo) no, y una vez cada 30 s como mucho: nunca en bucle
+  let verifying = 0;
+  const verify = () => {
+    clearTimeout(verifying);
+    verifying = setTimeout(() => {
+      if (location.pathname !== '/' || !document.querySelector('article') || followingShown()) return;
+      let last = 0;
+      try { last = Number(sessionStorage.getItem('brl_verify')) || 0; sessionStorage.setItem('brl_verify', String(Date.now())); } catch (e) {}
+      if (Date.now() - last < 30000) return;
+      dev('note', 'seguidos: Instagram no cambió de feed, recargué');
+      location.replace(FOLLOWING);
+    }, 1500);
+  };
+  // Al feed de seguidos dentro del sitio, como el botón atrás (sin recargar). Si recién empieza a cargar,
+  // cargándolo directo
   const toFollowing = (push) => {
     if (document.readyState === 'loading') { location.replace(FOLLOWING); return; }
     setTimeout(() => {
       if (!push && location.pathname !== '/') return; // Instagram ya se fue a otra página
-      const before = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
       history[push ? 'pushState' : 'replaceState'](null, '', FOLLOWING);
       dispatchEvent(new PopStateEvent('popstate', { state: null }));
-      setTimeout(() => {
-        if (location.pathname === '/' && before && before.isConnected && before.getClientRects().length)
-          location[push ? 'assign' : 'replace'](FOLLOWING);
-      }, 1000);
+      verify();
     }, 0);
   };
   let storyNext = null; // sección 16: al volver de unas historias abiertas desde su fila, la persona que sigue
@@ -248,9 +269,24 @@
     }
   };
 
+  // En "Solo seguidos" el inicio es el feed de seguidos: si Instagram va a "/" (la flecha de "Seguidos", el
+  // final de unas historias), va directo con ?variant=following, así arma ese feed y no hay que corregirlo
+  // después. Si venía de unas historias abiertas desde la fila de la sección 16, siguen las de la próxima
+  const home = (url) => {
+    if (url == null) return false;
+    try { const u = new URL(String(url), location.href); return u.pathname === '/' && !/[?&]variant=/.test(u.search); } catch (e) { return false; }
+  };
   for (const k of ['pushState', 'replaceState']) {
     const orig = history[k];
-    history[k] = function (...a) { const r = orig.apply(this, a); check(k === 'pushState'); return r; };
+    history[k] = function (...a) {
+      if (IG && CFG.igFeed === 'following' && !CFG.restricted && home(a[2])) {
+        if (!(/^\/stories\//.test(location.pathname) && storyNext && storyNext())) verify();
+        a[2] = FOLLOWING;
+      }
+      const r = orig.apply(this, a);
+      check(k === 'pushState');
+      return r;
+    };
   }
   // Tocar "Inicio" va directo al feed de seguidos, sin mostrar el otro un instante
   if (IG && CFG.igFeed === 'following') {
@@ -1211,6 +1247,7 @@
       const posts = document.querySelectorAll('main article');
       const all = posts.length ? posts : document.querySelectorAll('article');
       if (!all.length || performance.now() - placed < 500) return; // si Instagram la saca seguido, no pelear
+      if (!followingShown()) return; // en el feed normal ya está la de Instagram
       let list = all[0].parentElement;
       while (list && !list.contains(all[all.length - 1])) list = list.parentElement;
       if (!list || !list.parentElement) return;

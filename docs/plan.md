@@ -270,6 +270,15 @@ pantalla completa, solo en YouTube. "Datos bajados" (APK de prueba) reemplaza a 
 pruebas: MB de la app y, por página, cuánto bajó por tipo (imágenes, video, código), los pedidos de video
 y lo que hizo el script, aunque la página se recargue.
 
+**Tercera prueba (@version 18):** sin anuncios en YouTube e Instagram ✅, pantalla completa de YouTube ✅,
+ahorro de datos ✅ (Instagram 11 MB en un par de minutos: 8,5 de imágenes y 0 de video, con 113 pedidos
+de video en espera). Pero al volver de unas historias quedaba el feed normal ("Instagram", con
+sugerencias) con la URL de seguidos, y con dos filas de historias: Instagram cambiaba la URL sin cambiar
+de feed. Arreglos en @version 19: si Instagram va a "/" en "Solo seguidos", va directo con
+`?variant=following` (así arma ese feed); si a los 1,5 s se ve un feed sin el título "Seguidos", recarga en
+seguidos (una vez cada 30 s como mucho, y nunca sin publicaciones a la vista, como en el login); la fila
+propia solo se dibuja con el feed de seguidos a la vista.
+
 ### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
   entre los dos lados acostados). Video vertical: vertical.
