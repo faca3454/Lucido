@@ -289,6 +289,16 @@ propia solo se dibuja con el feed de seguidos a la vista.
 **Cuarta prueba (@version 19):** pasa a la persona que sigue, pero entre una y otra se ve un instante el
 inicio normal, y al final recarga: no es la experiencia del feed normal. Se cambia el enfoque (ver 7.2).
 
+**Quinta prueba (@version 20):** las historias andan como en el feed normal ✅. Pero se ven cuentas que no
+seguís: Instagram mezcla recomendaciones sin marcarlas (millo_ush, sin "Seguir" ni "Sugerencia"), la
+marca que sí pone es "Sugerencia para ti" (en singular) y tampoco se ocultó un anuncio, así que en el
+inicio las publicaciones probablemente no son `<article>`. Arreglos en @version 21: se compara el autor
+de cada publicación con la lista de cuentas que seguís (`/api/v1/friendships/<id>/following/`, guardada
+en el teléfono un día; tus publicaciones también van), las publicaciones se buscan como `<article>` o,
+si no hay, como el contenedor más grande con un solo "Me gusta" (también para los anuncios), y "Sugerencia
+para ti" en singular. "Datos bajados" dice cuántos `<article>` y "Me gusta" hay en el inicio y los errores
+del script.
+
 ### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
   entre los dos lados acostados). Video vertical: vertical.

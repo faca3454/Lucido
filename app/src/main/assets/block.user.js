@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      20
+// @version      21
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -85,6 +85,23 @@
   // Los APK de prueba ponen antes sus herramientas (devtools.js, que no va en la versión publicada): les
   // cuenta lo que hace el script por su cuenta, cuándo ya se ve la página y si no encontró "Responder"
   const dev = (what, x) => { if (window.__lucidoDev) window.__lucidoDev.on(what, x); };
+
+  // Publicaciones del feed de Instagram (secciones 15 y 16): cada una es un <article>; si en esa página no los
+  // usa, el contenedor más grande con un solo botón de "Me gusta" (y no más alto que dos pantallas y media)
+  const LIKE = 'svg[aria-label="Me gusta"], svg[aria-label="Like"], svg[aria-label="Ya no me gusta"], svg[aria-label="Unlike"]';
+  const feedPosts = () => {
+    const articles = document.getElementsByTagName('article');
+    if (articles.length) return [...articles];
+    const out = new Set();
+    for (const like of document.querySelectorAll(LIKE)) {
+      let p = like;
+      for (let up = p.parentElement; up && up !== document.body && up.querySelectorAll(LIKE).length === 1 &&
+        up.getBoundingClientRect().height < innerHeight * 2.5; up = up.parentElement) p = up;
+      if (p !== like) out.add(p);
+    }
+    return [...out];
+  };
+  const hasPosts = (el) => !!el.querySelector('article, ' + LIKE);
 
   // Lo que una sección rehace al cambiar la URL: corre ahora y después en cada cambio (desde check)
   const onRoute = [];
@@ -965,7 +982,7 @@
     // Una publicación lleva la etiqueta arriba, junto al nombre. Un <article> con otros adentro, o más alto que
     // dos pantallas, es una lista: ocultarlo se llevaría el feed entero
     const isAd = (post) => {
-      if (post.querySelector('article')) return false;
+      if (post.querySelector('article') || post.querySelectorAll(LIKE).length > 1) return false;
       const box = post.getBoundingClientRect();
       if (box.height > innerHeight * 2.5) return false;
       const el = label(post, 40);
@@ -979,7 +996,7 @@
       if (!styled) {
         styled = true;
         const s = document.createElement('style');
-        s.textContent = 'article[data-lucido-ad] { height:1px !important; min-height:0 !important; margin:0 !important; ' +
+        s.textContent = '[data-lucido-ad] { height:1px !important; min-height:0 !important; margin:0 !important; ' +
           'padding:0 !important; border:0 !important; overflow:hidden !important; visibility:hidden !important; }';
         (document.head || document.documentElement).appendChild(s);
       }
@@ -1051,15 +1068,8 @@
       const nodes = added;
       added = [];
       if (/^\/stories\//.test(location.pathname)) return skipStory();
-      const posts = new Set();
-      for (const n of nodes) {
-        const el = n.nodeType === 1 ? n : n.parentElement;
-        if (!el || !el.isConnected) continue;
-        const post = el.closest('article');
-        if (post) posts.add(post);
-        else if (el.getElementsByTagName) for (const a of el.getElementsByTagName('article')) posts.add(a);
-      }
-      for (const p of posts) hidePost(p);
+      if (!nodes.length) return;
+      for (const p of feedPosts()) hidePost(p); // pocas (Instagram tiene en la página solo las de cerca)
     };
     new MutationObserver((records) => {
       for (const r of records) {
@@ -1072,16 +1082,53 @@
 
   // --- 16. Solo cuentas que seguís (Instagram) ---
   // El inicio normal de Instagram, con su fila de historias (que pasa de una persona a otra, sin recargar),
-  // sin lo que no es de cuentas que seguís: las publicaciones con "Seguir" o "Sugerencias para ti" arriba, los
+  // sin lo que no es de cuentas que seguís. Instagram mezcla recomendaciones sin marcarlas, así que se compara
+  // el autor de cada publicación con la lista de cuentas que seguís (la de tu perfil, que se le pide a Instagram
+  // y se guarda en el teléfono un día). Además, las que dicen "Seguir" o "Sugerencia para ti" arriba, los
   // carruseles de sugerencias y, desde "Estás al día", todo lo que sigue (son sugerencias): ahí termina. Las de
   // antes del final se achican a 1 px sin salir de la página (si una desaparece, Instagram deja de cargar las
-  // que siguen); las de después desaparecen, justamente para que deje de cargar sugerencias. Por el texto,
-  // como los carteles de "Usá la app" (sección 6)
+  // que siguen); las de después desaparecen, justamente para que deje de cargar sugerencias
   if (IG && CFG.igFeed === 'following') {
     const FOLLOW = /^(seguir|follow)$/i;
-    const SUGGESTED = /^(sugerencias para ti|suggested for you|sugerido para ti|publicaci[oó]n sugerida|suggested post|publicaciones sugeridas|suggested posts|reels sugeridos|suggested reels)$/i;
+    const SUGGESTED = /^(sugerencias? para ti|suggested for you|sugerido para ti|publicaci[oó]n sugerida|suggested post|publicaciones sugeridas|suggested posts|reels sugeridos|suggested reels)$/i;
     const END = /(est[aá]s al d[ií]a|ya viste todo|all caught up|completely caught up|viste todas las publicaciones|seen all new posts)/i;
     const onHome = () => location.pathname === '/' && !CFG.restricted;
+    const API = { credentials: 'include', headers: { 'X-IG-App-ID': '936619743392459', 'X-Requested-With': 'XMLHttpRequest' } };
+
+    // Las cuentas que seguís, y la tuya (tus publicaciones también van). null mientras no se sabe
+    const KEY = 'brl_following';
+    let followed = null, asking = false, askedAt = -Infinity;
+    try {
+      const c = JSON.parse(localStorage.getItem(KEY));
+      if (c && Date.now() - c.at < 864e5) followed = new Set(c.users);
+    } catch (e) {}
+    const ask = async () => {
+      if (followed || asking || Date.now() - askedAt < 5 * 60e3) return; // si falló, de nuevo en 5 minutos
+      asking = true;
+      askedAt = Date.now();
+      try {
+        const me = (await (await fetch('/api/v1/accounts/current_user/?edit=true', API)).json()).user;
+        if (!me || !me.pk) return;
+        const users = [me.username];
+        let max = '';
+        for (let page = 0; page < 50; page++) { // hasta 10.000 cuentas
+          const r = await fetch(`/api/v1/friendships/${me.pk}/following/?count=200${max ? '&max_id=' + encodeURIComponent(max) : ''}`, API);
+          if (!r.ok) return;
+          const j = await r.json();
+          for (const u of j.users || []) if (u && u.username) users.push(u.username);
+          if (!j.next_max_id) break;
+          max = j.next_max_id;
+        }
+        followed = new Set(users);
+        try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), users })); } catch (e) {}
+        dev('note', `seguidos: la lista tiene ${users.length - 1} cuentas`);
+        later();
+      } catch (e) {
+        dev('note', 'seguidos: no pude traer la lista de cuentas que seguís');
+      } finally {
+        asking = false;
+      }
+    };
 
     // Un texto corto que cumple test, entre los primeros max de root (y que no esté en skip)
     const find = (root, test, max, skip) => {
@@ -1092,20 +1139,32 @@
       }
       return null;
     };
-    // Publicación de una cuenta que no seguís: "Seguir" o "Sugerencias para ti" arriba, junto al nombre
+    // Los autores: los links a perfiles de arriba, junto a la foto (una publicación en colaboración tiene varios)
+    const NOT_USER = /^(explore|reels?|p|stories|direct|accounts|about|legal|tv|web|challenge)$/;
+    const authors = (post, top) => {
+      const out = [];
+      for (const a of post.querySelectorAll('a[href]')) {
+        const m = a.getAttribute('href').match(/^\/([A-Za-z0-9._]{1,30})\/?$/);
+        if (m && !NOT_USER.test(m[1]) && a.getBoundingClientRect().top - top < 80) out.push(m[1].toLowerCase());
+      }
+      return out;
+    };
+    // De una cuenta que no seguís: su autor no está en la lista, o "Seguir" o "Sugerencia para ti" arriba
     const notFollowed = (post) => {
       const top = post.getBoundingClientRect().top;
       const near = (el) => !!el && el.getBoundingClientRect().top - top < 120;
-      return near(find(post, FOLLOW, 40)) || near(find(post, SUGGESTED, 40));
+      if (near(find(post, FOLLOW, 40)) || near(find(post, SUGGESTED, 40))) return true;
+      if (!followed) return false;
+      const who = authors(post, top);
+      return who.length > 0 && !who.some((u) => followed.has(u));
     };
     // Lo que va en la lista del feed al lado de las publicaciones (un carrusel, el aviso del final): el ancestro
     // más grande que no tiene publicaciones adentro. null si no está en la lista
     const blockOf = (el) => {
       let b = el;
-      while (b.parentElement && b.parentElement !== document.body && !b.parentElement.querySelector('article')) b = b.parentElement;
-      return b.parentElement && b.parentElement.querySelector('article') ? b : null;
+      while (b.parentElement && b.parentElement !== document.body && !hasPosts(b.parentElement)) b = b.parentElement;
+      return b.parentElement && hasPosts(b.parentElement) ? b : null;
     };
-    const inPost = (el) => !!el.closest('article');
 
     let styled = false;
     const hide = (el, how, why) => {
@@ -1125,14 +1184,18 @@
     let end = null; // "Estás al día": lo que viene después son sugerencias
     const after = (el) => !!end && !!(end.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
     const sweep = () => {
-      if (!onHome() || !document.body || !document.querySelector('article')) return;
+      if (!onHome() || !document.body) return;
+      const posts = feedPosts();
+      if (!posts.length) return;
+      ask();
+      const inPost = (el) => posts.some((p) => p.contains(el));
       if (end && !end.isConnected) end = null;
       if (!end) {
         const e = find(document.body, END, Infinity, inPost);
         if (e) { end = blockOf(e) || e; dev('note', 'seguidos: llegué a "Estás al día"'); }
       }
-      for (const post of document.querySelectorAll('article')) {
-        if (post.hasAttribute('data-lucido-hide') || post.closest('[data-lucido-hide]')) continue;
+      for (const post of posts) {
+        if (post.closest('[data-lucido-hide], [data-lucido-ad]')) continue;
         if (after(post)) hide(post, 'fin', 'seguidos: oculté lo que sigue a "Estás al día"');
         else if (notFollowed(post)) hide(post, '1px', 'seguidos: oculté una publicación de una cuenta que no seguís');
       }
@@ -1145,7 +1208,7 @@
         if (b && b !== end && !b.contains(end)) hide(b, after(b) ? 'fin' : '1px', 'seguidos: oculté sugerencias');
       }
       // Después del final, todo lo de la lista (también lo que no es una publicación)
-      if (end && end.parentElement && end.parentElement.querySelector('article')) {
+      if (end && end.parentElement && hasPosts(end.parentElement)) {
         for (let x = end.nextElementSibling; x; x = x.nextElementSibling) {
           if (!x.hasAttribute('data-lucido-hide')) hide(x, 'fin', 'seguidos: oculté lo que sigue a "Estás al día"');
         }

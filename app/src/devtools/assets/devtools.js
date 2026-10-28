@@ -125,6 +125,14 @@
     return xsend.apply(this, arguments);
   };
 
+  // Errores de los scripts de Lúcido (los de Instagram y YouTube vienen de sus archivos y no se cuentan)
+  addEventListener('error', (e) => {
+    if (e.filename && /cdninstagram|fbcdn|instagram\.com\/|youtube\.com\/|ytimg|gstatic/.test(e.filename)) return;
+    const w = 'error: ' + String(e.message).slice(0, 120);
+    notes[w] = (notes[w] || 0) + 1;
+    save();
+  });
+
   let benching = false; // midiendo en esta página: los videos, en silencio
   let wantVideo = null; // paso "abrir un video": desde cuándo y desde qué página (no cuentan las vistas previas de ahí)
   const asked = new WeakMap(), videos = [];
@@ -319,7 +327,11 @@
     report() {
       if (!data.n && !data.held && !Object.keys(notes).length && !(bytes.img + bytes.video + bytes.js + bytes.otros)) return null;
       const name = /instagram/.test(location.hostname) ? 'Instagram' : /youtube/.test(location.hostname) ? 'YouTube' : location.hostname;
-      return [name, bytesLine(), videoLine(), ...script()].join('\n');
+      // Cómo arma Instagram el feed: las secciones 15 y 16 buscan publicaciones (<article> o "Me gusta")
+      const like = 'svg[aria-label="Me gusta"], svg[aria-label="Like"], svg[aria-label="Ya no me gusta"], svg[aria-label="Unlike"]';
+      const shape = /instagram/.test(location.hostname) && location.pathname === '/'
+        ? [`Inicio: ${document.getElementsByTagName('article').length} <article>, ${document.querySelectorAll(like).length} "Me gusta"`] : [];
+      return [name, bytesLine(), videoLine(), ...shape, ...script()].join('\n');
     },
     reset() {
       for (const k of Object.keys(data)) data[k] = 0;
