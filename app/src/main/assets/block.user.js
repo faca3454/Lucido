@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      19
+// @version      20
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -181,49 +181,9 @@
   };
 
   // --- 3. Guardia de URL (respaldo; no depende del DOM) ---
-  // Feed de seguidos. Se reconoce por su título arriba ("Seguidos", con la flecha para volver): el normal
-  // dice "Instagram". Instagram puede cambiar la URL sin cambiar de feed, así que se mira lo que se ve
-  const FOLLOWING = '/?variant=following';
-  const followingShown = () => {
-    if (!document.body) return false;
-    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let n; (n = walk.nextNode());) {
-      if (n.data.length > 12 || !/^(seguidos|following|seguindo)$/i.test(n.data.trim())) continue;
-      const r = n.parentElement.getBoundingClientRect();
-      if (r.height && r.top < 120) return true;
-    }
-    return false;
-  };
-  // Si en 1,5 s se ve un feed que no es el de seguidos, se carga (recargando: como antes, pero nunca el
-  // normal). Sin publicaciones (el login, por ejemplo) no, y una vez cada 30 s como mucho: nunca en bucle
-  let verifying = 0;
-  const verify = () => {
-    clearTimeout(verifying);
-    verifying = setTimeout(() => {
-      if (location.pathname !== '/' || !document.querySelector('article') || followingShown()) return;
-      let last = 0;
-      try { last = Number(sessionStorage.getItem('brl_verify')) || 0; sessionStorage.setItem('brl_verify', String(Date.now())); } catch (e) {}
-      if (Date.now() - last < 30000) return;
-      dev('note', 'seguidos: Instagram no cambió de feed, recargué');
-      location.replace(FOLLOWING);
-    }, 1500);
-  };
-  // Al feed de seguidos dentro del sitio, como el botón atrás (sin recargar). Si recién empieza a cargar,
-  // cargándolo directo
-  const toFollowing = (push) => {
-    if (document.readyState === 'loading') { location.replace(FOLLOWING); return; }
-    setTimeout(() => {
-      if (!push && location.pathname !== '/') return; // Instagram ya se fue a otra página
-      history[push ? 'pushState' : 'replaceState'](null, '', FOLLOWING);
-      dispatchEvent(new PopStateEvent('popstate', { state: null }));
-      verify();
-    }, 0);
-  };
-  let storyNext = null; // sección 16: al volver de unas historias abiertas desde su fila, la persona que sigue
   let allowedReel = null;
-  let prevFollowing = false; // veníamos del feed de seguidos
   let lastPath = null;
-  const check = (nav) => {
+  const check = () => {
     const p = location.pathname;
     if (p !== lastPath) { lastPath = p; for (const f of onRoute) f(); }
 
@@ -250,15 +210,6 @@
       return;
     }
 
-    // Feed de inicio -> solo cuentas que seguís. Si Instagram limpia la URL después de
-    // cargar (replaceState a "/"), sigue siendo el feed de seguidos: no redirigir.
-    const following = p === '/' && /[?&]variant=following(&|$)/.test(location.search);
-    if (nav) prevFollowing = false;
-    if (CFG.igFeed === 'following' && p === '/' && !following && !prevFollowing) {
-      if (!(storyNext && storyNext())) toFollowing(false);
-      return;
-    }
-    prevFollowing = following || (p === '/' && prevFollowing);
     const m = p.match(/^\/reels?\/([\w-]+)/);
     if (!m || CFG.igReels) { allowedReel = null; return; }
     const id = m[1];
@@ -269,36 +220,11 @@
     }
   };
 
-  // En "Solo seguidos" el inicio es el feed de seguidos: si Instagram va a "/" (la flecha de "Seguidos", el
-  // final de unas historias), va directo con ?variant=following, así arma ese feed y no hay que corregirlo
-  // después. Si venía de unas historias abiertas desde la fila de la sección 16, siguen las de la próxima
-  const home = (url) => {
-    if (url == null) return false;
-    try { const u = new URL(String(url), location.href); return u.pathname === '/' && !/[?&]variant=/.test(u.search); } catch (e) { return false; }
-  };
   for (const k of ['pushState', 'replaceState']) {
     const orig = history[k];
-    history[k] = function (...a) {
-      if (IG && CFG.igFeed === 'following' && !CFG.restricted && home(a[2])) {
-        if (!(/^\/stories\//.test(location.pathname) && storyNext && storyNext())) verify();
-        a[2] = FOLLOWING;
-      }
-      const r = orig.apply(this, a);
-      check(k === 'pushState');
-      return r;
-    };
+    history[k] = function (...a) { const r = orig.apply(this, a); check(); return r; };
   }
-  // Tocar "Inicio" va directo al feed de seguidos, sin mostrar el otro un instante
-  if (IG && CFG.igFeed === 'following') {
-    addEventListener('click', (e) => {
-      if (!(e.target.closest && e.target.closest('a[href="/"]'))) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (location.pathname === '/') { location.assign(FOLLOWING); return; } // ya en el feed: recargarlo
-      toFollowing(true);
-    }, true);
-  }
-  addEventListener('popstate', () => check(true));
+  addEventListener('popstate', () => check());
   // Respaldo por si la SPA cambia la URL por otra vía. Lo normal lo atrapan los hooks y popstate,
   // así que alcanza con mirar cada tanto (antes era cada 400 ms, también mientras scrolleás)
   setInterval(check, 3000);
@@ -1144,187 +1070,92 @@
     }).observe(document, { childList: true, subtree: true, characterData: true }); // document: el <html> puede no existir todavía
   }
 
-  // --- 16. Historias arriba del feed de seguidos (Instagram) ---
-  // Instagram no muestra su fila de historias en /?variant=following. Se dibuja una igual, con los datos que
-  // usa Instagram para la suya (las de la gente que seguís, sin las silenciadas): tocar a alguien abre sus
-  // historias. Si Instagram no contesta, no hay fila, como antes. Se trae de nuevo al volver al feed, cada
-  // un minuto como mucho.
+  // --- 16. Solo cuentas que seguís (Instagram) ---
+  // El inicio normal de Instagram, con su fila de historias (que pasa de una persona a otra, sin recargar),
+  // sin lo que no es de cuentas que seguís: las publicaciones con "Seguir" o "Sugerencias para ti" arriba, los
+  // carruseles de sugerencias y, desde "Estás al día", todo lo que sigue (son sugerencias): ahí termina. Las de
+  // antes del final se achican a 1 px sin salir de la página (si una desaparece, Instagram deja de cargar las
+  // que siguen); las de después desaparecen, justamente para que deje de cargar sugerencias. Por el texto,
+  // como los carteles de "Usá la app" (sección 6)
   if (IG && CFG.igFeed === 'following') {
-    const onFeed = () => location.pathname === '/' && !CFG.restricted;
-    let tray = null, fetchedAt = -Infinity, loading = false;
-    let row = null, shown = false; // la fila armada y si ya apareció (el fundido, solo la primera vez)
+    const FOLLOW = /^(seguir|follow)$/i;
+    const SUGGESTED = /^(sugerencias para ti|suggested for you|sugerido para ti|publicaci[oó]n sugerida|suggested post|publicaciones sugeridas|suggested posts|reels sugeridos|suggested reels)$/i;
+    const END = /(est[aá]s al d[ií]a|ya viste todo|all caught up|completely caught up|viste todas las publicaciones|seen all new posts)/i;
+    const onHome = () => location.pathname === '/' && !CFG.restricted;
 
-    const load = () => {
-      if (loading || performance.now() - fetchedAt < 60000) return;
-      loading = true;
-      fetch('/api/v1/feed/reels_tray/', {
-        credentials: 'include', headers: { 'X-IG-App-ID': '936619743392459', 'X-Requested-With': 'XMLHttpRequest' },
-      })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          fetchedAt = performance.now();
-          tray = ((j && j.tray) || []).filter((t) => t && t.user && t.user.username && !t.muted).map((t) => ({
-            user: t.user.username, pic: t.user.profile_pic_url || '',
-            seen: t.seen >= t.latest_reel_media, close: !!t.has_besties_media,
-          }));
-          if (row) { row.remove(); row = null; }
-          draw();
-        })
-        .catch(() => {})
-        .finally(() => { loading = false; });
+    // Un texto corto que cumple test, entre los primeros max de root (y que no esté en skip)
+    const find = (root, test, max, skip) => {
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n, i = 0; (n = walk.nextNode()) && i < max; i++) {
+        const t = n.data.length <= 80 && n.data.trim();
+        if (t && test.test(t) && !(skip && skip(n.parentElement))) return n.parentElement;
+      }
+      return null;
     };
+    // Publicación de una cuenta que no seguís: "Seguir" o "Sugerencias para ti" arriba, junto al nombre
+    const notFollowed = (post) => {
+      const top = post.getBoundingClientRect().top;
+      const near = (el) => !!el && el.getBoundingClientRect().top - top < 120;
+      return near(find(post, FOLLOW, 40)) || near(find(post, SUGGESTED, 40));
+    };
+    // Lo que va en la lista del feed al lado de las publicaciones (un carrusel, el aviso del final): el ancestro
+    // más grande que no tiene publicaciones adentro. null si no está en la lista
+    const blockOf = (el) => {
+      let b = el;
+      while (b.parentElement && b.parentElement !== document.body && !b.parentElement.querySelector('article')) b = b.parentElement;
+      return b.parentElement && b.parentElement.querySelector('article') ? b : null;
+    };
+    const inPost = (el) => !!el.closest('article');
 
-    // Aro con los colores de Instagram (gris si ya la viste, verde si es de mejores amigos). El hueco entre
-    // el aro y la foto es del color de la página, que se mira al armarla (claro u oscuro)
-    const CSS = `
-      .lucido-st { display:flex; gap:12px; overflow-x:auto; overflow-y:hidden; padding:10px 12px 12px;
-        scrollbar-width:none; overscroll-behavior-x:contain; -webkit-tap-highlight-color:transparent;
-        border-bottom:1px solid rgba(128,128,128,.22); }
-      .lucido-st::-webkit-scrollbar { display:none; }
-      .lucido-st a { flex:0 0 auto; width:66px; display:flex; flex-direction:column; align-items:center; gap:6px;
-        color:inherit; text-decoration:none; touch-action:manipulation; user-select:none; -webkit-user-select:none;
-        -webkit-touch-callout:none; }
-      .lucido-st .ring { width:66px; height:66px; padding:2px; box-sizing:border-box; border-radius:50%;
-        background:linear-gradient(45deg,#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5);
-        transition:transform 120ms cubic-bezier(.23,1,.32,1), opacity 120ms; }
-      .lucido-st .seen .ring { padding:1px; background:rgba(128,128,128,.45); }
-      .lucido-st .close .ring { background:#1cbf4e; }
-      .lucido-st img { display:block; width:100%; height:100%; box-sizing:border-box; border-radius:50%;
-        border:3px solid var(--lucido-gap,#fff); object-fit:cover; background:rgba(128,128,128,.2); }
-      .lucido-st .seen img { border-width:4px; }
-      .lucido-st a:active .ring { transform:scale(.96); }
-      .lucido-st span { max-width:66px; font-size:12px; line-height:16px; overflow:hidden; text-overflow:ellipsis;
-        white-space:nowrap; }
-      @media (prefers-reduced-motion: reduce) { .lucido-st a:active .ring { transform:none; opacity:.7; } }`;
     let styled = false;
-    const pageColor = (el) => {
-      for (; el && el.nodeType === 1; el = el.parentElement) {
-        const c = getComputedStyle(el).backgroundColor;
-        if (c && !/^(transparent|rgba\(\d+, \d+, \d+, 0\))$/.test(c)) return c;
-      }
-      return matchMedia('(prefers-color-scheme: dark)').matches ? '#000' : '#fff';
-    };
-    const build = () => {
-      const ES = /^es/i.test(document.documentElement.lang || navigator.language || ''); // al cargar, todavía no hay <html>
-      const r = document.createElement('div');
-      r.className = 'lucido-st';
-      r.setAttribute('aria-label', ES ? 'Historias' : 'Stories');
-      for (const t of tray) {
-        const a = document.createElement('a');
-        a.href = '/stories/' + encodeURIComponent(t.user) + '/';
-        a.className = (t.seen ? 'seen' : '') + (t.close && !t.seen ? ' close' : '');
-        a.setAttribute('aria-label', ES ? `Historia de ${t.user}` : `${t.user}'s story`);
-        const ring = document.createElement('div');
-        ring.className = 'ring';
-        const img = document.createElement('img');
-        img.alt = '';
-        img.decoding = 'async';
-        img.referrerPolicy = 'no-referrer';
-        img.src = t.pic;
-        ring.appendChild(img);
-        const name = document.createElement('span');
-        name.textContent = t.user;
-        a.append(ring, name);
-        // Dentro del sitio, como el botón atrás (sin recargar). Pasa a vista cuando ya la tapan las historias.
-        // Después siguen las de los demás que no viste, en el orden de la fila
-        a.addEventListener('click', (e) => {
-          e.preventDefault();
-          t.seen = true;
-          setQueue(tray.slice(tray.indexOf(t) + 1).filter((x) => !x.seen).map((x) => x.user));
-          navigate(a.getAttribute('href'), false);
-          setTimeout(() => { a.className = 'seen'; }, 400);
-        });
-        r.appendChild(a);
-      }
-      return r;
-    };
-    // Va arriba de la lista de publicaciones y ahí se queda: al bajar, Instagram saca de la página las de arriba
-    // (y las vuelve a poner al subir), así que "antes de la primera" la llevaba al medio del feed y lo hacía
-    // saltar. La lista es lo que tiene adentro a la primera y a la última publicación
-    let placed = -Infinity;
-    const draw = () => {
-      if (!onFeed() || !tray || !tray.length || (row && row.isConnected)) return;
-      const posts = document.querySelectorAll('main article');
-      const all = posts.length ? posts : document.querySelectorAll('article');
-      if (!all.length || performance.now() - placed < 500) return; // si Instagram la saca seguido, no pelear
-      if (!followingShown()) return; // en el feed normal ya está la de Instagram
-      let list = all[0].parentElement;
-      while (list && !list.contains(all[all.length - 1])) list = list.parentElement;
-      if (!list || !list.parentElement) return;
-      placed = performance.now();
+    const hide = (el, how, why) => {
+      if (el.hasAttribute('data-lucido-hide')) return;
       if (!styled) {
-        const s = document.createElement('style');
-        s.textContent = CSS;
-        (document.head || document.documentElement).appendChild(s);
         styled = true;
+        const s = document.createElement('style');
+        s.textContent = '[data-lucido-hide="1px"] { height:1px !important; min-height:0 !important; margin:0 !important; ' +
+          'padding:0 !important; border:0 !important; overflow:hidden !important; visibility:hidden !important; } ' +
+          '[data-lucido-hide="fin"] { display:none !important; }';
+        (document.head || document.documentElement).appendChild(s);
       }
-      if (!row) row = build();
-      list.parentElement.insertBefore(row, list);
-      row.style.setProperty('--lucido-gap', pageColor(row.parentElement));
-      if (!shown) {
-        shown = true;
-        row.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: 'cubic-bezier(.23,1,.32,1)' });
-      }
+      el.setAttribute('data-lucido-hide', how);
+      dev('note', why);
     };
 
-    // Al terminar las historias de alguien que abriste desde la fila, Instagram vuelve al inicio: ahí (sección 3)
-    // se sigue con la próxima persona sin ver, como en su fila. Se guarda en la pestaña por si vuelve
-    // recargando. Si las cerraste vos (la X, deslizar para abajo o atrás), no sigue
-    const KEY = 'brl_stories';
-    let queue = [];
-    try { queue = JSON.parse(sessionStorage.getItem(KEY)) || []; } catch (e) {}
-    const setQueue = (q) => {
-      queue = q;
-      try { if (q.length) sessionStorage.setItem(KEY, JSON.stringify(q)); else sessionStorage.removeItem(KEY); } catch (e) {}
+    let end = null; // "Estás al día": lo que viene después son sugerencias
+    const after = (el) => !!end && !!(end.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const sweep = () => {
+      if (!onHome() || !document.body || !document.querySelector('article')) return;
+      if (end && !end.isConnected) end = null;
+      if (!end) {
+        const e = find(document.body, END, Infinity, inPost);
+        if (e) { end = blockOf(e) || e; dev('note', 'seguidos: llegué a "Estás al día"'); }
+      }
+      for (const post of document.querySelectorAll('article')) {
+        if (post.hasAttribute('data-lucido-hide') || post.closest('[data-lucido-hide]')) continue;
+        if (after(post)) hide(post, 'fin', 'seguidos: oculté lo que sigue a "Estás al día"');
+        else if (notFollowed(post)) hide(post, '1px', 'seguidos: oculté una publicación de una cuenta que no seguís');
+      }
+      // Carruseles y títulos de sugerencias, fuera de las publicaciones
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n; (n = walk.nextNode());) {
+        const t = n.data.length <= 40 && n.data.trim();
+        if (!t || !SUGGESTED.test(t) || inPost(n.parentElement) || n.parentElement.closest('[data-lucido-hide]')) continue;
+        const b = blockOf(n.parentElement);
+        if (b && b !== end && !b.contains(end)) hide(b, after(b) ? 'fin' : '1px', 'seguidos: oculté sugerencias');
+      }
+      // Después del final, todo lo de la lista (también lo que no es una publicación)
+      if (end && end.parentElement && end.parentElement.querySelector('article')) {
+        for (let x = end.nextElementSibling; x; x = x.nextElementSibling) {
+          if (!x.hasAttribute('data-lucido-hide')) hide(x, 'fin', 'seguidos: oculté lo que sigue a "Estás al día"');
+        }
+      }
     };
-    storyNext = () => {
-      const next = queue[0];
-      if (!next) return false;
-      setQueue(queue.slice(1));
-      const t = tray && tray.find((x) => x.user === next);
-      if (t) t.seen = true;
-      if (row) row = null; // al volver se arma con las vistas al día
-      const to = '/stories/' + encodeURIComponent(next) + '/';
-      dev('note', 'historias: seguí con la próxima persona');
-      if (document.readyState === 'loading') location.replace(to);
-      else setTimeout(() => navigate(to, true), 0);
-      return true;
-    };
-    const inStories = () => /^\/stories\//.test(location.pathname);
-    addEventListener('click', (e) => {
-      if (!e.isTrusted || !inStories() || !queue.length) return;
-      const t = e.target.nodeType === 1 ? e.target : e.target.parentElement;
-      const btn = t && (t.closest('[role="button"], button, a') || t);
-      if (!btn) return;
-      const names = [btn.getAttribute('aria-label'),
-        ...[...btn.querySelectorAll('[aria-label], title')].map((x) => x.getAttribute('aria-label') || x.textContent)];
-      if (names.some((n) => /^(cerrar|close)$/i.test((n || '').trim()))) setQueue([]);
-    }, true);
-    let from = null; // dónde empezó el dedo en las historias
-    addEventListener('touchstart', (e) => {
-      from = inStories() && e.touches.length === 1 ? [e.touches[0].clientX, e.touches[0].clientY] : null;
-    }, { capture: true, passive: true });
-    addEventListener('touchend', (e) => {
-      const t = from && e.changedTouches[0];
-      if (t && t.clientY - from[1] > 80 && t.clientY - from[1] > Math.abs(t.clientX - from[0])) setQueue([]);
-      from = null;
-    }, { capture: true, passive: true });
-
-    // Mientras estás en el feed: se vuelve a poner si Instagram rearma la lista (o recién llegan las publicaciones)
-    let pending = false;
-    const watch = new MutationObserver(() => {
-      if (pending) return;
-      pending = true;
-      requestAnimationFrame(() => { pending = false; draw(); });
-    });
-    route(() => {
-      watch.disconnect();
-      if (onFeed() && /[?&]variant=following/.test(location.search)) setQueue([]); // atrás, o ya no hay a quién seguir
-      if (!onFeed()) return;
-      watch.observe(document, { childList: true, subtree: true });
-      load();
-      draw();
-    });
+    // Cuando cambia algo, como mucho una vez cada 600 ms (mira toda la página)
+    let timer = 0;
+    const later = () => { if (!timer && onHome()) timer = setTimeout(() => { timer = 0; sweep(); }, 600); };
+    new MutationObserver(later).observe(document, { childList: true, subtree: true, characterData: true });
+    route(later);
   }
 
   // --- 17. Acostar el teléfono mirando un video: pantalla completa (YouTube) ---
