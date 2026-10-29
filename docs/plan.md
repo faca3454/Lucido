@@ -299,6 +299,16 @@ si no hay, como el contenedor más grande con un solo "Me gusta" (también para 
 para ti" en singular. "Datos bajados" dice cuántos `<article>` y "Me gusta" hay en el inicio y los errores
 del script.
 
+**Sexta prueba (@version 21):** el inicio sí usa `<article>` (8) y los anuncios se ocultan (21), pero la
+lista de cuentas que seguís nunca llegó (sin nota: el pedido se cortaba sin avisar), así que solo se
+ocultaban las marcadas (51), y con tantas publicaciones achicándose la pantalla saltaba. Arreglos en
+@version 22: el feed se filtra desde los datos (sección 18: `xdt_api__v1__feed__timeline__connection`, al
+leerlos con `JSON.parse` o `Response.json`), así lo que no va ni se dibuja: anuncios y, en "Solo cuentas que
+seguís", lo de cuentas que no seguís (según `friendship_status` o la lista) y las sugerencias; dos páginas
+seguidas sin cuentas que seguís terminan el feed. Lo que se oculta en la página se mira apenas aparece,
+antes de dibujarse. La lista busca tu cuenta en la cookie `ds_user_id` o en `current_user`, y cada falla
+queda anotada en "Datos bajados".
+
 ### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
   entre los dos lados acostados). Video vertical: vertical.

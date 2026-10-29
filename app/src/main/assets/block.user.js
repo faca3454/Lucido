@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      21
+// @version      22
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -102,6 +102,8 @@
     return [...out];
   };
   const hasPosts = (el) => !!el.querySelector('article, ' + LIKE);
+  // Las cuentas que seguís (sección 16), en minúsculas, para filtrar el feed (secciones 16 y 18). null si no se sabe
+  let igFollowed = null;
 
   // Lo que una sección rehace al cambiar la URL: corre ahora y después en cada cambio (desde check)
   const onRoute = [];
@@ -1073,8 +1075,12 @@
     };
     new MutationObserver((records) => {
       for (const r of records) {
-        if (r.type === 'characterData') added.push(r.target);
-        else for (const n of r.addedNodes) added.push(n);
+        if (r.type === 'characterData') { added.push(r.target); continue; }
+        for (const n of r.addedNodes) {
+          added.push(n);
+          // Una publicación nueva, apenas aparece (antes de que se dibuje: si se achica después, la pantalla salta)
+          if (n.nodeType === 1) for (const post of n.tagName === 'ARTICLE' ? [n] : n.getElementsByTagName('article')) hidePost(post);
+        }
       }
       if (!scheduled && added.length) { scheduled = true; idle(sweep); }
     }).observe(document, { childList: true, subtree: true, characterData: true }); // document: el <html> puede no existir todavía
@@ -1097,34 +1103,39 @@
 
     // Las cuentas que seguís, y la tuya (tus publicaciones también van). null mientras no se sabe
     const KEY = 'brl_following';
-    let followed = null, asking = false, askedAt = -Infinity;
+    let asking = false, askedAt = -Infinity;
     try {
       const c = JSON.parse(localStorage.getItem(KEY));
-      if (c && Date.now() - c.at < 864e5) followed = new Set(c.users);
+      if (c && Date.now() - c.at < 864e5 && c.users.length) igFollowed = new Set(c.users);
     } catch (e) {}
     const ask = async () => {
-      if (followed || asking || Date.now() - askedAt < 5 * 60e3) return; // si falló, de nuevo en 5 minutos
+      if (igFollowed || asking || Date.now() - askedAt < 5 * 60e3) return; // si falló, de nuevo en 5 minutos
       asking = true;
       askedAt = Date.now();
       try {
-        const me = (await (await fetch('/api/v1/accounts/current_user/?edit=true', API)).json()).user;
-        if (!me || !me.pk) return;
-        const users = [me.username];
+        // Tu cuenta: el número, de la cookie de la sesión o preguntándole a Instagram (que da también tu nombre)
+        let id = (document.cookie.match(/(?:^|;\s*)ds_user_id=(\d+)/) || [])[1], me = '';
+        const r0 = await fetch('/api/v1/accounts/current_user/?edit=true', API);
+        const j0 = r0.ok ? await r0.json().catch(() => null) : null;
+        if (j0 && j0.user) { id = id || String(j0.user.pk || j0.user.pk_id || ''); me = j0.user.username || ''; }
+        if (!id) return dev('note', `seguidos: no pude saber cuál es tu cuenta (Instagram respondió ${r0.status})`);
+        const users = me ? [me.toLowerCase()] : [];
         let max = '';
         for (let page = 0; page < 50; page++) { // hasta 10.000 cuentas
-          const r = await fetch(`/api/v1/friendships/${me.pk}/following/?count=200${max ? '&max_id=' + encodeURIComponent(max) : ''}`, API);
-          if (!r.ok) return;
+          const r = await fetch(`/api/v1/friendships/${id}/following/?count=200${max ? '&max_id=' + encodeURIComponent(max) : ''}`, API);
+          if (!r.ok) return dev('note', `seguidos: Instagram no dio la lista (respondió ${r.status})`);
           const j = await r.json();
-          for (const u of j.users || []) if (u && u.username) users.push(u.username);
+          for (const u of j.users || []) if (u && u.username) users.push(u.username.toLowerCase());
           if (!j.next_max_id) break;
           max = j.next_max_id;
         }
-        followed = new Set(users);
+        if (users.length <= (me ? 1 : 0)) return dev('note', 'seguidos: la lista vino vacía');
+        igFollowed = new Set(users);
         try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), users })); } catch (e) {}
-        dev('note', `seguidos: la lista tiene ${users.length - 1} cuentas`);
+        dev('note', `seguidos: la lista tiene ${users.length - (me ? 1 : 0)} cuentas`);
         later();
       } catch (e) {
-        dev('note', 'seguidos: no pude traer la lista de cuentas que seguís');
+        dev('note', 'seguidos: no pude traer la lista de cuentas que seguís (' + String(e && e.message).slice(0, 60) + ')');
       } finally {
         asking = false;
       }
@@ -1154,9 +1165,9 @@
       const top = post.getBoundingClientRect().top;
       const near = (el) => !!el && el.getBoundingClientRect().top - top < 120;
       if (near(find(post, FOLLOW, 40)) || near(find(post, SUGGESTED, 40))) return true;
-      if (!followed) return false;
+      if (!igFollowed) return false;
       const who = authors(post, top);
-      return who.length > 0 && !who.some((u) => followed.has(u));
+      return who.length > 0 && !who.some((u) => igFollowed.has(u));
     };
     // Lo que va en la lista del feed al lado de las publicaciones (un carrusel, el aviso del final): el ancestro
     // más grande que no tiene publicaciones adentro. null si no está en la lista
@@ -1214,10 +1225,24 @@
         }
       }
     };
-    // Cuando cambia algo, como mucho una vez cada 600 ms (mira toda la página)
+    // Una publicación nueva se mira apenas aparece, antes de que se dibuje: si se achica después, la pantalla
+    // salta. Lo demás (sugerencias, el final, lo que tarda en llegar), como mucho una vez cada 600 ms
     let timer = 0;
     const later = () => { if (!timer && onHome()) timer = setTimeout(() => { timer = 0; sweep(); }, 600); };
-    new MutationObserver(later).observe(document, { childList: true, subtree: true, characterData: true });
+    new MutationObserver((records) => {
+      if (!onHome()) return;
+      for (const r of records) {
+        for (const n of r.addedNodes) {
+          if (n.nodeType !== 1) continue;
+          for (const post of n.tagName === 'ARTICLE' ? [n] : n.getElementsByTagName('article')) {
+            if (post.closest('[data-lucido-hide], [data-lucido-ad]')) continue;
+            if (after(post)) hide(post, 'fin', 'seguidos: oculté lo que sigue a "Estás al día"');
+            else if (notFollowed(post)) hide(post, '1px', 'seguidos: oculté una publicación de una cuenta que no seguís');
+          }
+        }
+      }
+      later();
+    }).observe(document, { childList: true, subtree: true, characterData: true });
     route(later);
   }
 
@@ -1250,5 +1275,65 @@
     };
     // Otro video sí, otra página no: si se va del video, sale (la app se entera por la URL)
     route(() => { if (!/^\/watch/.test(location.pathname)) document.documentElement && document.documentElement.classList.remove('lucido-full'); });
+  }
+
+  // --- 18. El feed de Instagram, filtrado desde los datos ---
+  // Lo más prolijo es que lo que no va ni llegue a dibujarse: se saca de los datos del feed
+  // (xdt_api__v1__feed__timeline__connection) cuando Instagram los lee (JSON.parse, Response.json), como los
+  // anuncios de YouTube (sección 15). Sale lo que es un anuncio y, en "Solo cuentas que seguís", lo de cuentas
+  // que no seguís (según Instagram mismo, friendship_status, o la lista de la sección 16) y las sugerencias. Lo
+  // que no se reconozca queda, y lo atajan las secciones 15 y 16. Si dos páginas seguidas no traen nada de
+  // cuentas que seguís, el feed termina: ya viste todo y lo que sigue son sugerencias
+  if (IG && (CFG.igBlockAds || CFG.igFeed === 'following')) {
+    const FEED = 'xdt_api__v1__feed__timeline__connection';
+    const only = CFG.igFeed === 'following';
+    const myId = (document.cookie.match(/(?:^|;\s*)ds_user_id=(\d+)/) || [])[1];
+    let empty = 0, seen = false;
+    // 'ad', 'other' (de una cuenta que no seguís, o una sugerencia), 'followed' o '?' (no se sabe: queda)
+    const kind = (n) => {
+      if (!n || typeof n !== 'object') return '?';
+      const m = n.media;
+      if (n.ad || (m && (m.ad_id || m.is_ad || m.ad_action))) return 'ad';
+      if (n.explore_story || n.suggested_users) return 'other';
+      const u = m && (m.user || m.owner);
+      if (!u || !u.username) return '?';
+      if (myId && String(u.pk || u.id) === myId) return 'followed';
+      const fs = u.friendship_status;
+      if (fs && typeof fs.following === 'boolean') return fs.following ? 'followed' : 'other';
+      if (igFollowed) return igFollowed.has(String(u.username).toLowerCase()) ? 'followed' : 'other';
+      return '?';
+    };
+    const prune = (c) => {
+      if (!c || !Array.isArray(c.edges)) return;
+      if (!seen) { seen = true; dev('note', 'feed: leo los datos del feed'); }
+      let ads = 0, others = 0, mine = 0;
+      c.edges = c.edges.filter((e) => {
+        const k = kind(e && e.node);
+        if (k === 'ad' && CFG.igBlockAds) { ads++; return false; }
+        if (k === 'other' && only) { others++; return false; }
+        if (k === 'followed') mine++;
+        return true;
+      });
+      for (let i = 0; i < ads; i++) dev('note', 'feed: saqué un anuncio de los datos');
+      for (let i = 0; i < others; i++) dev('note', 'feed: saqué una publicación de una cuenta que no seguís de los datos');
+      if (!only || !c.page_info) return;
+      if (mine) empty = 0;
+      else if (others && ++empty >= 2 && c.page_info.has_next_page) {
+        c.page_info.has_next_page = false;
+        dev('note', 'feed: terminé el feed (dos páginas sin cuentas que seguís)');
+      }
+    };
+    const find = (o, depth) => {
+      if (!o || typeof o !== 'object' || depth > 40) return;
+      if (o[FEED]) prune(o[FEED]);
+      for (const k in o) if (o[k] && typeof o[k] === 'object') find(o[k], depth + 1);
+    };
+    const parse = JSON.parse;
+    JSON.parse = function (text) {
+      const o = parse.apply(this, arguments);
+      if (typeof text === 'string' && text.indexOf(FEED) !== -1) { try { find(o, 0); } catch (e) {} }
+      return o;
+    };
+    Response.prototype.json = function () { return this.text().then((t) => JSON.parse(t)); };
   }
 })();

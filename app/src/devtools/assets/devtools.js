@@ -128,6 +128,7 @@
   // Errores de los scripts de Lúcido (los de Instagram y YouTube vienen de sus archivos y no se cuentan)
   addEventListener('error', (e) => {
     if (e.filename && /cdninstagram|fbcdn|instagram\.com\/|youtube\.com\/|ytimg|gstatic/.test(e.filename)) return;
+    if (/^Script error\.?$/.test(e.message)) return; // de un script de otro sitio: el navegador no dice cuál
     const w = 'error: ' + String(e.message).slice(0, 120);
     notes[w] = (notes[w] || 0) + 1;
     save();
