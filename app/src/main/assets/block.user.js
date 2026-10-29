@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      25
+// @version      26
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -102,6 +102,29 @@
     return [...out];
   };
   const hasPosts = (el) => !!el.querySelector('article, ' + LIKE);
+  // Publicidad de Instagram (secciones 15 y 16): la etiqueta "Publicidad" entre los primeros textos de root;
+  // puede venir partida en varios elementos chicos
+  const AD = /^(publicidad|patrocinado|sponsored|ad|anuncio|publicidade|sponsoris[ée]|sponsorizzato|gesponsert)$/i;
+  const adLabel = (root, max) => {
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n, i = 0; (n = walk.nextNode()) && i < max; i++) {
+      for (let el = n.parentElement, up = 0; el && up < 3 && el !== root; el = el.parentElement, up++) {
+        const t = el.textContent;
+        if (t.length > 40) break;
+        if (AD.test(t.replace(/\s+/g, ' ').trim())) return el;
+      }
+    }
+    return null;
+  };
+  // Una publicación lleva la etiqueta arriba, junto al nombre. Un <article> con otros adentro, o más alto que
+  // dos pantallas, es una lista: ocultarlo se llevaría el feed entero
+  const isAd = (post) => {
+    if (post.querySelector('article') || post.querySelectorAll(LIKE).length > 1) return false;
+    const box = post.getBoundingClientRect();
+    if (box.height > innerHeight * 2.5) return false;
+    const el = adLabel(post, 40);
+    return !!el && el.getBoundingClientRect().top - box.top < 120;
+  };
   // Las cuentas que seguís (sección 16), en minúsculas, para filtrar el feed (secciones 16 y 18). null si no se sabe
   let igFollowed = null;
 
@@ -1006,33 +1029,33 @@
       if (btn) btn.click();
     };
     for (const type of ['loadedmetadata', 'playing', 'timeupdate']) addEventListener(type, skipAd, true);
+  } else if (YT && window.__lucidoDev) {
+    // APK de prueba con "Sin anuncios" apagado: anotar si YouTube manda anuncios (quedan). Así se sabe si no
+    // aparecen porque YouTube no los manda
+    const sent = (t) => !!t && typeof t === 'object' &&
+      ['adPlacements', 'playerAds', 'adSlots'].some((k) => Array.isArray(t[k]) && t[k].length > 0);
+    const note = (o) => {
+      try {
+        if ((Array.isArray(o) ? o : [o]).some((x) => sent(x) || sent(x && x.playerResponse)))
+          dev('note', 'anuncios: YouTube mandó anuncios para un video y quedan ("Sin anuncios" apagado)');
+      } catch (e) {}
+      return o;
+    };
+    const parse = JSON.parse;
+    JSON.parse = function () { return note(parse.apply(this, arguments)); };
+    const json = Response.prototype.json;
+    Response.prototype.json = function () { return json.apply(this, arguments).then(note); };
+    let initial;
+    try {
+      Object.defineProperty(window, 'ytInitialPlayerResponse', {
+        configurable: true, get: () => initial, set: (v) => { initial = note(v); },
+      });
+    } catch (e) {}
   }
 
   // Instagram: las publicaciones con "Publicidad" se ocultan y las historias patrocinadas se saltean. Por el
   // texto de la etiqueta, que va arriba junto al nombre (como los carteles de "Usá la app", sección 6).
   if (IG && CFG.igBlockAds) {
-    const AD = /^(publicidad|patrocinado|sponsored|ad|anuncio|publicidade|sponsoris[ée]|sponsorizzato|gesponsert)$/i;
-    // La etiqueta entre los primeros textos de root; puede venir partida en varios elementos chicos
-    const label = (root, max) => {
-      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      for (let n, i = 0; (n = walk.nextNode()) && i < max; i++) {
-        for (let el = n.parentElement, up = 0; el && up < 3 && el !== root; el = el.parentElement, up++) {
-          const t = el.textContent;
-          if (t.length > 40) break;
-          if (AD.test(t.replace(/\s+/g, ' ').trim())) return el;
-        }
-      }
-      return null;
-    };
-    // Una publicación lleva la etiqueta arriba, junto al nombre. Un <article> con otros adentro, o más alto que
-    // dos pantallas, es una lista: ocultarlo se llevaría el feed entero
-    const isAd = (post) => {
-      if (post.querySelector('article') || post.querySelectorAll(LIKE).length > 1) return false;
-      const box = post.getBoundingClientRect();
-      if (box.height > innerHeight * 2.5) return false;
-      const el = label(post, 40);
-      return !!el && el.getBoundingClientRect().top - box.top < 120;
-    };
     // Se achica a nada sin sacarla de la página: si una publicación desaparece (display:none), Instagram deja
     // de cargar las que siguen
     let styled = false;
@@ -1204,8 +1227,10 @@
       }
       return out;
     };
-    // De una cuenta que no seguís: su autor no está en la lista, o "Seguir" o "Sugerencia para ti" arriba
+    // De una cuenta que no seguís: su autor no está en la lista, o "Seguir" o "Sugerencia para ti" arriba. La
+    // publicidad la decide "Sin anuncios" (sección 15): apagado, se ve, aunque sea de una cuenta que no seguís
     const notFollowed = (post) => {
+      if (!CFG.igBlockAds && isAd(post)) return false;
       const top = post.getBoundingClientRect().top;
       const near = (el) => !!el && el.getBoundingClientRect().top - top < 120;
       if (near(find(post, FOLLOW, 40)) || near(find(post, SUGGESTED, 40))) return true;
@@ -1418,6 +1443,7 @@
       let ads = 0, others = 0, mine = 0;
       c.edges = c.edges.filter((e) => {
         const k = kind(e && e.node);
+        if (k === 'ad' && !CFG.igBlockAds) dev('note', 'anuncios: dejé un anuncio en el feed ("Sin anuncios" apagado)');
         if (k === 'ad' && CFG.igBlockAds) { ads++; return false; }
         if (k === 'other' && only) { others++; return false; }
         if (only && following && shown.has(idOf(e))) return false;

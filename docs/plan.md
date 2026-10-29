@@ -341,6 +341,20 @@ y de qué feed es cada página ("seguidos" o "inicio").
 esperando, 0 MB). El informe confirma el camino: la primera página vino con la página (del inicio, 1 de
 cuentas que seguís) y las 14 siguientes fueron del feed de Seguidos, con 2 a 8 publicaciones cada una.
 
+**Décima prueba (APK 1.3.0 de prueba, @version 24):** los widgets abren las estadísticas ✅. Los interruptores
+de "Sin anuncios" no hacían nada: apagados, los anuncios no volvían (en las dos apps). En Instagram, con "Solo
+cuentas que seguís", la publicidad se ocultaba igual como "de una cuenta que no seguís". Arreglo en @version
+26: ahí la publicidad la decide solo "Sin anuncios" (la detección de publicidad pasa a ser compartida por las
+secciones 15 y 16). En YouTube el camino (panel → `Rules.build` → recarga → script) está bien en el código y en
+las pruebas; para saber si YouTube no manda anuncios o si el cambio no llega, "Datos bajados" muestra qué valor
+de "Sin anuncios" recibió cada página y anota "YouTube mandó anuncios para un video y quedan".
+
+**Navegadores de noche:** un compañero abrió Brave y Chrome con un compromiso y de noche. Hueco encontrado
+(sin poder probarlo en un teléfono): al abrir un navegador, la Accesibilidad manda al inicio y descarta los
+eventos de los 1,5 s siguientes; si se lo vuelve a abrir en ese rato, queda abierto, porque no llega otro evento
+hasta cambiar de app. Arreglo: al terminar ese rato se mira de nuevo la app que se ve (la ventana activa), y
+mientras dura el bloqueo se revisa cada 10 s de noche (60 s el resto) qué app se ve.
+
 ### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
   entre los dos lados acostados). Video vertical: vertical.
