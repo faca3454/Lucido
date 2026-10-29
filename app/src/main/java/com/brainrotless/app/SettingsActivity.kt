@@ -44,6 +44,7 @@ class SettingsActivity : AppCompatActivity() {
             onClick("perm_links") { Setup.openLinks(requireContext()) }
             onClick("perm_guard") { Setup.openAccessibility(requireContext()) }
             onClick("perm_restricted") { Setup.explainRestricted(requireActivity()) }
+            onClick("stats") { PanelActivity.open(requireContext(), PanelActivity.STATS) }
             onClick("guide") { startActivity(OnboardingActivity.intent(requireContext(), again = true)) }
             onClick("panel_sleep") { PanelActivity.open(requireContext(), PanelActivity.SLEEP) }
             onClick("panel_focus") { PanelActivity.open(requireContext(), PanelActivity.FOCUS) }
@@ -80,7 +81,7 @@ class SettingsActivity : AppCompatActivity() {
             refreshBypass()
         }
 
-        /** Resumen de cada pantalla de reglas, como en el inicio. */
+        /** Resumen de cada pantalla de reglas, como en el inicio, y de las estadísticas. */
         private fun refreshRules() {
             val c = requireContext()
             findPreference<Preference>("panel_sleep")?.summary = when {
@@ -96,6 +97,8 @@ class SettingsActivity : AppCompatActivity() {
                 resources.getQuantityString(R.plurals.days_left_n, left, left)
             } else getString(R.string.home_commit_idle, Commitment.MIN_DAYS)
             findPreference<Preference>("panel_apps")?.summary = getString(R.string.panel_apps_summary)
+            findPreference<Preference>("stats")?.summary =
+                PanelScreen.statsBrief(c, Usage.history(c), Usage.today(c), UsageAccess.baseline(c))
         }
 
         // ---------- Pausa del bloqueo ----------

@@ -150,5 +150,10 @@ object Protection {
             else PackageManager.COMPONENT_ENABLED_STATE_ENABLED
         if (pm.getComponentEnabledSetting(comp) != want)
             runCatching { pm.setComponentEnabledSetting(comp, want, PackageManager.DONT_KILL_APP) }
+                .onSuccess { Widgets.update(c, force = true) } // tocarlos abre el inicio o, escondido, las estadísticas
     }
+
+    /** El ícono (y con él el inicio) está escondido ahora. */
+    fun iconHidden(c: Context) = c.packageManager.getComponentEnabledSetting(ComponentName(c, HomeActivity::class.java)) ==
+        PackageManager.COMPONENT_ENABLED_STATE_DISABLED
 }

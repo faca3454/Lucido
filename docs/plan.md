@@ -225,7 +225,8 @@ arrancan con su valor por defecto y el compromiso en curso no se toca.
   datos del video antes de que YouTube los lea; si igual aparece un anuncio, silenciarlo y saltarlo.
 - Instagram: ocultar las publicaciones con "Publicidad" / "Sponsored" y saltar las historias
   patrocinadas.
-- Prendido por defecto (`igBlockAds`, `ytBlockAds`); el interruptor llega con la 1.3.0.
+- Prendido por defecto (`igBlockAds`, `ytBlockAds`); el interruptor llega con la 1.3.0. ✅ Hecho: sección
+  "Anuncios" en *Instagram y YouTube* (`ig_block_ads`, `yt_block_ads`), que `Rules.build` le pasa al script.
 - Si YouTube cambia la forma de meter anuncios: mirar qué cambió uBlock Origin y copiar la idea.
 
 ### 7.2 Historias en "Solo seguidos" (tanda A)
@@ -252,6 +253,10 @@ arrancan con su valor por defecto y el compromiso en curso no se toca.
   tampoco abrían). Caminos nuevos: atajo "Estadísticas" al mantener presionado IG Lite / YT Lite,
   los widgets abren las estadísticas si el ícono está escondido, una fila en Ajustes y la comparación
   con antes en la pantalla del compromiso.
+- ✅ Hecho (1.3.0): atajo *Estadísticas* (antes de *Ajustes*) en los tres íconos; los widgets abren las
+  estadísticas mientras el inicio está apagado (y se rearman al esconder o mostrar el ícono); fila
+  *Estadísticas* arriba de todo en Ajustes; y en el compromiso activo, una fila con cómo vas ("42% menos
+  que antes de Lúcido", o el promedio, o lo de hoy) que lleva a las estadísticas.
 
 **Primera prueba en el teléfono (@version 16):** YouTube sin anuncios ✅. Instagram: ocultar la
 publicación con `display:none` cortaba la carga del resto del feed, y las historias patrocinadas no se

@@ -159,6 +159,11 @@
     <string name="pref_tap">Tap to play videos</string>
     <string name="pref_tap_summary">Saves data: videos don\'t autoplay. Reels people send you still do</string>
     <string name="pref_cat_comfort">Comfort</string>
+    <string name="pref_cat_ads">Ads</string>
+    <string name="pref_ig_ads">No ads on Instagram</string>
+    <string name="pref_ig_ads_summary">Removes sponsored posts and stories</string>
+    <string name="pref_yt_ads">No ads on YouTube</string>
+    <string name="pref_yt_ads_summary">Removes ads in videos and sponsored videos</string>
     <string name="pref_smooth">Smooth transitions</string>
     <string name="pref_smooth_summary">A short fade when changing pages. Taps are ignored while it lasts</string>
     <string name="pref_swipe">Swipe to reply (experimental)</string>
@@ -240,7 +245,7 @@
     <string name="panel_pauses_sub">2 per day max</string>
     <string name="panel_extras">Extras</string>
     <string name="panel_apps">Instagram and YouTube</string>
-    <string name="panel_apps_summary">Feed, videos, comfort and official apps</string>
+    <string name="panel_apps_summary">Feed, videos, ads, comfort and official apps</string>
     <string name="panel_days_minus">One day fewer</string>
     <string name="panel_days_plus">One day more</string>
     <string name="panel_back">Back</string>
@@ -308,6 +313,7 @@
     <string name="stats_split_none">From now on, Lúcido tracks Instagram and YouTube separately.</string>
     <string name="stats_empty">No usage recorded yet. Use Instagram or YouTube from Lúcido and you\'ll see how it\'s going here.</string>
     <string name="stats_open">See stats</string>
+    <string name="stats_brief_empty">How much you use each day, and before vs now</string>
     <string name="summary_charts">See charts</string>
     <plurals name="stats_avg_days">
         <item quantity="one">average of 1 day</item>

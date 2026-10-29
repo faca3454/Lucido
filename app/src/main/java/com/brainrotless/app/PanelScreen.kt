@@ -53,6 +53,7 @@ object PanelScreen {
         val showLast: () -> Unit = {},
         val pause: () -> Unit = {},
         val openUsageAccess: () -> Unit = {},
+        val stats: () -> Unit = {},
         val debugEnd: () -> Unit = {},
         // Instagram y YouTube
         val feed: (String) -> Unit = {},
@@ -253,6 +254,9 @@ object PanelScreen {
         val pauseUntil: Long? = null, // pausa en curso
         val canPause: Boolean = false,
         val usageAccess: Boolean = false,
+        val history: Map<LocalDate, DayUsage> = emptyMap(), // para la fila de estadísticas
+        val today: LocalDate = LocalDate.of(2026, 1, 1),
+        val before: Long? = null, // promedio de antes de Lúcido
         val debug: Boolean = false,
         val animate: Boolean = false, // la barra se llena desde cero (al abrir)
     )
@@ -288,6 +292,9 @@ object PanelScreen {
             addView(stat(c, c.getString(R.string.panel_pauses), s.pausesLeft.toString(), c.getString(R.string.panel_pauses_sub)),
                 LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginStart = Brand.px(c, 12) })
         }, 12)
+
+        // Cómo vas comparado con antes y, de acá, las estadísticas (con el ícono escondido no hay inicio)
+        add(Brand.card(linkRow(c, c.getString(R.string.stats_title), statsBrief(c, s.history, s.today, s.before), a.stats)), 12)
 
         when {
             s.pauseUntil != null -> add(banner(c, c.getString(R.string.pause_running,
@@ -326,6 +333,7 @@ object PanelScreen {
     /** Interruptores de esta pantalla y su valor si nunca se tocaron. */
     val APP_PREFS = mapOf(
         "ig_block_explore" to true, "ig_tap_to_play" to false, "ig_reels_in_limit" to true,
+        "ig_block_ads" to true, "yt_block_ads" to true,
         "smooth_transitions" to false, "swipe_reply" to true, "official_in_limit" to false,
     )
 
@@ -346,6 +354,13 @@ object PanelScreen {
             prefSwitch("ig_tap_to_play", R.string.pref_tap, R.string.pref_tap_summary),
             space(c, 12),
             prefSwitch("ig_reels_in_limit", R.string.pref_reels, R.string.pref_reels_summary)
+        )), 12)
+
+        add(label(c, c.getString(R.string.pref_cat_ads)), 18)
+        add(Brand.card(column(c,
+            prefSwitch("ig_block_ads", R.string.pref_ig_ads, R.string.pref_ig_ads_summary),
+            space(c, 12),
+            prefSwitch("yt_block_ads", R.string.pref_yt_ads, R.string.pref_yt_ads_summary)
         )), 12)
 
         add(label(c, c.getString(R.string.pref_cat_comfort)), 18)
@@ -391,6 +406,26 @@ object PanelScreen {
     }
 
     // ---------- Estadísticas ----------
+
+    /**
+     * Una línea de cómo vas, para la fila que lleva a las estadísticas (compromiso, Ajustes): contra
+     * antes de Lúcido, si se puede; si no, el promedio de la semana o lo de hoy.
+     */
+    fun statsBrief(c: Context, history: Map<LocalDate, DayUsage>, today: LocalDate, before: Long?): String {
+        val avg = StatsMath.average(StatsMath.window(history, today, 7))
+        return when {
+            avg != null && before != null && before > 0 -> StatsMath.change(before, avg).let { change ->
+                when {
+                    change < 0 -> "${-change}% " + c.getString(R.string.stats_less)
+                    change > 0 -> "$change% " + c.getString(R.string.stats_more)
+                    else -> c.getString(R.string.stats_same).replaceFirstChar { it.uppercase() }
+                }
+            }
+            avg != null -> c.getString(R.string.stats_avg) + ": " + formatDuration(avg)
+            history.isNotEmpty() -> c.getString(R.string.stats_today) + ": " + formatDuration(history[today]?.total ?: 0)
+            else -> c.getString(R.string.stats_brief_empty)
+        }
+    }
 
     class StatsState(
         val history: Map<LocalDate, DayUsage> = emptyMap(),

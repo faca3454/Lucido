@@ -65,6 +65,8 @@ object Rules {
             .put("ytShorts", reels)
             .put("smooth", p.getBoolean("smooth_transitions", false))
             .put("swipeReply", p.getBoolean("swipe_reply", true))
+            .put("igBlockAds", p.getBoolean("ig_block_ads", true))
+            .put("ytBlockAds", p.getBoolean("yt_block_ads", true))
         // Hora de dormir, foco o límite diario: Instagram solo para mensajes. El porqué y hasta cuándo
         // lo dice la barra de la app (el cartel del script, restrictedMsg, queda para Safari)
         if (Lock.ig(c) != null) cfg.put("restricted", true)
