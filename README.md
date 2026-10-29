@@ -98,6 +98,6 @@ Para qué es cada permiso (ninguno se pide hasta que activás la función que lo
 - **Micrófono** (*audios en los chats*): solo cuando grabás un audio en Instagram. Android lo pregunta la primera vez.
 - **Notificaciones** (*modo dormir, compromiso, mensajes y resumen semanal*): para avisarte antes del modo dormir, cuando llegás al límite y el resumen de los domingos.
 
-Con *Solo cuentas que seguís*, Lúcido le pide a Instagram la lista de cuentas que seguís (la misma que ves en tu perfil) para saber qué publicaciones mostrar. Queda guardada en el teléfono un día y no va a ningún otro lado.
+Con *Solo cuentas que seguís*, el inicio muestra el feed de la pestaña Seguidos de Instagram, y Lúcido le pide la lista de cuentas que seguís (la misma que ves en tu perfil) para sacar lo que se cuele. La lista queda guardada en el teléfono un día y no va a ningún otro lado.
 
 Las reglas de bloqueo se descargan de este repositorio por HTTPS para seguir funcionando cuando Instagram o YouTube cambian algo. Si preferís que no, apagá *Actualizar reglas de bloqueo* en Ajustes.

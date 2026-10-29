@@ -319,6 +319,19 @@ tiene `ad_id`, y `injected_story_units`, que es como Instagram mete las de las h
 anota cuántas de cuentas que seguís trae cada página y encuentra las páginas aunque hayas cerrado IG Lite
 desde Recientes (siguen vivas 30 minutos).
 
+**Octava prueba (@version 23):** sin publicidad en las historias ✅. El feed sigue tardando: el informe dice
+que cada página del inicio trae 0 o 1 publicación de cuentas que seguís (el resto son recomendaciones), así
+que al recargar se ve una sola y las demás tardan. Arreglo en @version 24: el inicio le pide a Instagram el
+feed de su pestaña Seguidos (solo cuentas que seguís, del más nuevo al más viejo). En el código de Instagram
+web, la consulta del feed (`PolarisFeedTimelineRootV2Query` y su paginación
+`PolarisFeedRootPaginationCachedQuery_subscribe`) lleva `variant` (`home`, `following`, `favorites`,
+`past_posts`) y Seguidos usa `pagination_source: "following"`; el script los cambia en el pedido y la
+pantalla sigue siendo la del inicio, con su fila de historias. Si la primera página viene con la página
+(sin pedido), la siguiente arranca Seguidos desde arriba sin repetir lo que ya se ve. Si Instagram no
+acepta el pedido (error o sin publicaciones), vuelve al inicio filtrado mientras la app siga abierta. El
+filtro de los datos y el de la pantalla quedan de respaldo. "Datos bajados" anota "pedí el feed de seguidos"
+y de qué feed es cada página ("seguidos" o "inicio").
+
 ### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
   entre los dos lados acostados). Video vertical: vertical.

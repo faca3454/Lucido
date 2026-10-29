@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      23
+// @version      24
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -1134,7 +1134,8 @@
   // y se guarda en el teléfono un día). Además, las que dicen "Seguir" o "Sugerencia para ti" arriba, los
   // carruseles de sugerencias y, desde "Estás al día", todo lo que sigue (son sugerencias): ahí termina. Las de
   // antes del final se achican a 1 px sin salir de la página (si una desaparece, Instagram deja de cargar las
-  // que siguen); las de después desaparecen, justamente para que deje de cargar sugerencias
+  // que siguen); las de después desaparecen, justamente para que deje de cargar sugerencias. Las publicaciones
+  // ya vienen del feed de Seguidos (sección 18): esto ataja lo que se cuele
   if (IG && CFG.igFeed === 'following') {
     const FOLLOW = /^(seguir|follow)$/i;
     const SUGGESTED = /^(sugerencias? para ti|suggested for you|sugerido para ti|publicaci[oó]n sugerida|suggested post|publicaciones sugeridas|suggested posts|reels sugeridos|suggested reels)$/i;
@@ -1325,12 +1326,75 @@
   // que no seguís (según Instagram mismo, friendship_status, o la lista de la sección 16) y las sugerencias. Lo
   // que no se reconozca queda, y lo atajan las secciones 15 y 16. Si dos páginas seguidas no traen nada de
   // cuentas que seguís, el feed termina: ya viste todo y lo que sigue son sugerencias. La publicidad sale de
-  // cualquier dato, también la de las historias
+  // cualquier dato, también la de las historias.
+  // En "Solo cuentas que seguís", además, el inicio le pide a Instagram el feed de su pestaña Seguidos (solo
+  // cuentas que seguís, de lo más nuevo a lo más viejo) en vez del suyo, que casi no trae nada de cuentas que
+  // seguís y por eso tardaba en llenar la pantalla. Se cambia en el pedido (variant y pagination_source, como
+  // los manda Instagram en Seguidos) y la pantalla sigue siendo la del inicio, con su fila de historias. La
+  // primera página puede venir ya con la página, sin pedido que cambiar: entonces la que sigue arranca el feed
+  // de Seguidos desde arriba, sin repetir lo que ya se ve. Si Instagram no lo acepta, vuelve al inicio filtrado
+  // mientras la app siga abierta
   if (IG && (CFG.igBlockAds || CFG.igFeed === 'following')) {
     const FEED = 'xdt_api__v1__feed__timeline__connection';
     const only = CFG.igFeed === 'following';
     const myId = (document.cookie.match(/(?:^|;\s*)ds_user_id=(\d+)/) || [])[1];
+    const parse = JSON.parse;
     let empty = 0, seen = false;
+
+    const QUERY = /(?:^|&)fb_api_req_friendly_name=PolarisFeed(?:TimelineRootV2Query|RootPaginationCachedQuery\w*)(?:&|$)/;
+    const BAD = 'lucido-feed-seguidos-no';
+    let bad = false, started = false;
+    try { bad = sessionStorage.getItem(BAD) === '1'; } catch (e) {}
+    const shown = new Set(); // lo que llegó con el feed del inicio, para no repetirlo
+    const idOf = (e) => { const m = e && e.node && e.node.media; return m ? String(m.pk || m.id || '') : ''; };
+    // El pedido del feed del inicio, cambiado al de Seguidos; null si no es ese pedido (o no se cambia)
+    const swap = (body) => {
+      if (!only || bad || typeof body !== 'string' || !QUERY.test(body)) return null;
+      try {
+        const p = new URLSearchParams(body);
+        const v = parse(p.get('variables'));
+        if (!v || typeof v !== 'object' || (v.variant && v.variant !== 'home')) return null;
+        v.variant = 'following';
+        v.data = Object.assign({}, v.data, { pagination_source: 'following' });
+        if (!started && (v.after || v.before)) {
+          v.after = v.before = null;
+          dev('note', 'feed: arranco el de seguidos desde arriba');
+        }
+        started = true;
+        p.set('variables', JSON.stringify(v));
+        dev('note', 'feed: pedí el feed de seguidos');
+        return p.toString();
+      } catch (e) { return null; }
+    };
+    const failed = (why) => {
+      if (bad) return;
+      bad = true;
+      try { sessionStorage.setItem(BAD, '1'); } catch (e) {}
+      dev('note', `feed: Instagram no aceptó el pedido del feed de seguidos (${why}): vuelvo al inicio filtrado`);
+    };
+    if (only) {
+      const xsend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function (body) {
+        const b = swap(body);
+        if (b === null) return xsend.apply(this, arguments);
+        this.addEventListener('load', () => {
+          let text = '';
+          try { text = this.responseType === '' || this.responseType === 'text' ? this.responseText : ''; } catch (e) {}
+          if (this.status !== 200) failed('respondió ' + this.status);
+          else if (text && !/"edges":\s*\[/.test(text)) failed('no mandó publicaciones');
+        });
+        return xsend.call(this, b);
+      };
+      const fetch1 = window.fetch;
+      window.fetch = function (input, init) {
+        const b = init ? swap(init.body) : null;
+        if (b === null) return fetch1.apply(window, arguments);
+        return fetch1.call(window, input, Object.assign({}, init, { body: b })).then((r) => {
+          if (!r.ok) failed('respondió ' + r.status);
+          return r;
+        });
+      };
+    }
     // 'ad', 'other' (de una cuenta que no seguís, o una sugerencia), 'followed' o '?' (no se sabe: queda)
     const kind = (n) => {
       if (!n || typeof n !== 'object') return '?';
@@ -1348,17 +1412,21 @@
     const prune = (c) => {
       if (!c || !Array.isArray(c.edges)) return;
       if (!seen) { seen = true; dev('note', 'feed: leo los datos del feed'); }
+      const following = c.pagination_source === 'following';
       let ads = 0, others = 0, mine = 0;
       c.edges = c.edges.filter((e) => {
         const k = kind(e && e.node);
         if (k === 'ad' && CFG.igBlockAds) { ads++; return false; }
         if (k === 'other' && only) { others++; return false; }
+        if (only && following && shown.has(idOf(e))) return false;
         if (k === 'followed') mine++;
         return true;
       });
+      if (only && !following) for (const e of c.edges) { const id = idOf(e); if (id) shown.add(id); }
       for (let i = 0; i < ads; i++) dev('note', 'feed: saqué un anuncio de los datos');
       for (let i = 0; i < others; i++) dev('note', 'feed: saqué una publicación de una cuenta que no seguís de los datos');
-      if (only) dev('note', `feed: página con ${mine} de cuentas que seguís`); // si casi siempre es 0, tarda en llenar la pantalla
+      // Si casi siempre es 0, tarda en llenar la pantalla. "seguidos" es el feed de Seguidos; "inicio", el normal
+      if (only) dev('note', `feed: página (${following ? 'seguidos' : c.pagination_source || 'inicio'}) con ${mine} de cuentas que seguís`);
       if (!only || !c.page_info) return;
       if (mine) empty = 0;
       else if (others && ++empty >= 2 && c.page_info.has_next_page) {
@@ -1391,7 +1459,6 @@
       }
       return n;
     };
-    const parse = JSON.parse;
     JSON.parse = function (text) {
       const o = parse.apply(this, arguments);
       if (typeof text !== 'string') return o;
