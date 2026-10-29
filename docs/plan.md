@@ -332,6 +332,10 @@ acepta el pedido (error o sin publicaciones), vuelve al inicio filtrado mientras
 filtro de los datos y el de la pantalla quedan de respaldo. "Datos bajados" anota "pedí el feed de seguidos"
 y de qué feed es cada página ("seguidos" o "inicio").
 
+**Novena prueba (@version 24):** ✅ carga rapidísimo, sin publicidad y sin bajar video (282 pedidos de video
+esperando, 0 MB). El informe confirma el camino: la primera página vino con la página (del inicio, 1 de
+cuentas que seguís) y las 14 siguientes fueron del feed de Seguidos, con 2 a 8 publicaciones cada una.
+
 ### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
   entre los dos lados acostados). Video vertical: vertical.
