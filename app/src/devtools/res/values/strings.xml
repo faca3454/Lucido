@@ -18,7 +18,7 @@
     <string name="dev_data_reset">Poner en cero</string>
     <string name="dev_data_zero">Listo: cuenta desde ahora</string>
     <string name="dev_data_none">Este teléfono no informa los datos de cada app</string>
-    <string name="dev_data_no_pages">IG Lite y YT Lite no están abiertas: abrilas, usalas y volvé a mirar.</string>
+    <string name="dev_data_no_pages">IG Lite y YT Lite no están abiertas (o las cerraste hace más de 30 minutos): abrilas, usalas y volvé a mirar.</string>
     <string name="dev_copy">Copiar</string>
     <string name="dev_data_copied">Copiado: pegalo en el chat.</string>
 </resources>

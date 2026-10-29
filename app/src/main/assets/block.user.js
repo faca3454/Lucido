@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      22
+// @version      23
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -317,20 +317,58 @@
         return false;
       }
     };
+    // De qué video es cada pedido: Instagram arma cada video con un MediaSource (src = blob:) y pide sus pedazos
+    // apenas le agrega un SourceBuffer; después, los de la misma dirección son del mismo video. Así, al tocar
+    // uno salen sus pedidos y no los de los demás, que siguen esperando (descartarlos dejaba a esos videos con
+    // "Tenemos problemas para reproducir este video")
+    const blobs = new Map(), msVideo = new WeakMap(), pathVideo = new Map();
+    let attaching = null; // { video, at }: al que se le acaba de agregar un SourceBuffer
+    if (typeof MediaSource !== 'undefined') {
+      const createURL = URL.createObjectURL;
+      URL.createObjectURL = function (o) {
+        const u = createURL.apply(this, arguments);
+        if (o instanceof MediaSource) { blobs.set(u, o); if (blobs.size > 50) blobs.delete(blobs.keys().next().value); }
+        return u;
+      };
+      const add = MediaSource.prototype.addSourceBuffer;
+      MediaSource.prototype.addSourceBuffer = function () {
+        const v = msVideo.get(this);
+        if (v) attaching = { video: v, at: performance.now() };
+        return add.apply(this, arguments);
+      };
+    }
+    const attach = (m, src) => { const ms = blobs.get(String(src)); if (ms) msVideo.set(ms, m); };
+    const ownerOf = (url) => {
+      let path;
+      try { path = new URL(url, location.href).pathname; } catch (e) { return null; }
+      let v = pathVideo.get(path);
+      if (!v && attaching && performance.now() - attaching.at < 1500) {
+        v = attaching.video;
+        pathVideo.set(path, v);
+        if (pathVideo.size > 300) pathVideo.delete(pathVideo.keys().next().value);
+      }
+      return v || null;
+    };
+
     const KEEP = 2;
-    let held = []; // { send, drop? }, en el orden en que llegaron
-    const hold = (h) => { held.push(h); dev('video', 'held'); };
-    const release = (why) => {
-      if (!held.length || !isOpen()) return;
-      const all = held;
-      held = [];
+    let held = []; // { send, owner }, en el orden en que llegaron
+    const hold = (h, url) => { h.owner = ownerOf(url); held.push(h); dev('video', 'held'); };
+    const send = (list, why) => {
+      if (!list.length) return;
+      held = held.filter((h) => !list.includes(h));
       dev('note', `videos solo al tocar: salieron los pedidos (${why})`);
-      all.forEach((h, i) => (i >= all.length - KEEP || !h.drop ? h.send() : h.drop()));
+      for (const h of list) h.send();
+    };
+    // Los del video que arrancó; si no se sabe de quién es cada uno, los últimos (los de los videos de cerca)
+    const release = (why, video) => {
+      if (!held.length || !isOpen()) return;
+      const mine = video ? held.filter((h) => h.owner === video) : [];
+      send(mine.length ? mine : held.slice(-KEEP), why);
     };
     const play0 = (m) => {
       if (playing.has(m)) return;
       playing.add(m);
-      release(!(m instanceof HTMLVideoElement) ? 'un audio' : tapped.has(m) ? 'tocaste un video' : 'un reel o una historia');
+      release(!(m instanceof HTMLVideoElement) ? 'un audio' : tapped.has(m) ? 'tocaste un video' : 'un reel o una historia', m);
     };
 
     const fetch0 = window.fetch;
@@ -341,14 +379,11 @@
       const args = arguments;
       return new Promise((resolve, reject) => {
         const off = () => { if (signal) signal.removeEventListener('abort', abort); };
-        const h = {
-          send: () => { off(); dev('video', 'sent'); fetch0.apply(window, args).then(resolve, reject); },
-          drop: () => { off(); dev('video', 'dropped'); reject(new TypeError('Failed to fetch')); },
-        };
+        const h = { send: () => { off(); dev('video', 'sent'); fetch0.apply(window, args).then(resolve, reject); } };
         // Instagram ya no lo quiere (pasaste de largo): se olvida
         const abort = () => { held = held.filter((x) => x !== h); reject(signal.reason || new DOMException('Aborted', 'AbortError')); };
         if (signal) signal.addEventListener('abort', abort);
-        hold(h);
+        hold(h, url);
       });
     };
     const xhr = XMLHttpRequest.prototype, xopen = xhr.open, xsend = xhr.send, xabort = xhr.abort;
@@ -360,9 +395,9 @@
       const url = xurl.get(this) || '';
       if (isOpen(url) || !isVideo(url)) return xsend.apply(this, arguments);
       const x = this, args = arguments;
-      const h = { send: () => { xheld.delete(x); dev('video', 'sent'); xsend.apply(x, args); } }; // sin drop: no se puede imitar el corte
+      const h = { send: () => { xheld.delete(x); dev('video', 'sent'); xsend.apply(x, args); } };
       xheld.set(x, h);
-      hold(h);
+      hold(h, url);
     };
     route(() => release('abriste un reel o una historia'));
     addEventListener('click', (e) => {
@@ -378,8 +413,11 @@
     };
     prop('preload', 'none');
     prop('autoplay', false);
+    const srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+    Object.defineProperty(HTMLMediaElement.prototype, 'src', { ...srcDesc, set(x) { attach(this, x); srcDesc.set.call(this, x); } });
     const setAttr = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function (name, value) {
+      if (this instanceof HTMLMediaElement && /^src$/i.test(name)) attach(this, value);
       if (this instanceof HTMLVideoElement && /^(preload|autoplay)$/i.test(name) && !allowed(this)) {
         if (/^autoplay$/i.test(name)) return;
         value = 'none';
@@ -448,6 +486,9 @@
         tapAt = performance.now();
         v.preload = 'auto';
         v.play().catch(() => {});
+        // Si a los 3 s sigue esperando datos, salen todos los pedidos que esperaban: mejor gastar un poco que un
+        // video trabado (no se supo de cuál era cada uno)
+        setTimeout(() => { if (!v.paused && v.readyState < 3 && held.length) send(held.slice(), 'el que tocaste no arrancaba'); }, 3000);
         return;
       }
     }, true);
@@ -1283,7 +1324,8 @@
   // anuncios de YouTube (sección 15). Sale lo que es un anuncio y, en "Solo cuentas que seguís", lo de cuentas
   // que no seguís (según Instagram mismo, friendship_status, o la lista de la sección 16) y las sugerencias. Lo
   // que no se reconozca queda, y lo atajan las secciones 15 y 16. Si dos páginas seguidas no traen nada de
-  // cuentas que seguís, el feed termina: ya viste todo y lo que sigue son sugerencias
+  // cuentas que seguís, el feed termina: ya viste todo y lo que sigue son sugerencias. La publicidad sale de
+  // cualquier dato, también la de las historias
   if (IG && (CFG.igBlockAds || CFG.igFeed === 'following')) {
     const FEED = 'xdt_api__v1__feed__timeline__connection';
     const only = CFG.igFeed === 'following';
@@ -1316,6 +1358,7 @@
       });
       for (let i = 0; i < ads; i++) dev('note', 'feed: saqué un anuncio de los datos');
       for (let i = 0; i < others; i++) dev('note', 'feed: saqué una publicación de una cuenta que no seguís de los datos');
+      if (only) dev('note', `feed: página con ${mine} de cuentas que seguís`); // si casi siempre es 0, tarda en llenar la pantalla
       if (!only || !c.page_info) return;
       if (mine) empty = 0;
       else if (others && ++empty >= 2 && c.page_info.has_next_page) {
@@ -1328,10 +1371,37 @@
       if (o[FEED]) prune(o[FEED]);
       for (const k in o) if (o[k] && typeof o[k] === 'object') find(o[k], depth + 1);
     };
+    // Publicidad en cualquier dato (las historias patrocinadas, también): lo que tiene un ad_id, y las "historias
+    // inyectadas" (injected_story_units), que es como Instagram mete las publicidades entre historias
+    const AD_DATA = /"ad_id":\s*"?\d|injected_story_units/;
+    const isAdItem = (e) => !!e && typeof e === 'object' &&
+      (!!e.ad_id || e.is_ad === true || !!(e.node && (e.node.ad || (e.node.media && e.node.media.ad_id))));
+    const stripAds = (o, depth) => {
+      if (!o || typeof o !== 'object' || depth > 40) return 0;
+      let n = 0;
+      if (Array.isArray(o)) {
+        for (let i = o.length - 1; i >= 0; i--) if (isAdItem(o[i])) { o.splice(i, 1); n++; }
+      }
+      for (const k in o) {
+        const v = o[k];
+        if (!v || typeof v !== 'object') continue;
+        if (/injected_story_units/.test(k)) {
+          for (const kk in v) if (Array.isArray(v[kk]) && v[kk].length) { n += v[kk].length; v[kk].length = 0; }
+        } else n += stripAds(v, depth + 1);
+      }
+      return n;
+    };
     const parse = JSON.parse;
     JSON.parse = function (text) {
       const o = parse.apply(this, arguments);
-      if (typeof text === 'string' && text.indexOf(FEED) !== -1) { try { find(o, 0); } catch (e) {} }
+      if (typeof text !== 'string') return o;
+      try {
+        if (text.indexOf(FEED) !== -1) find(o, 0);
+        if (CFG.igBlockAds && AD_DATA.test(text)) {
+          const n = stripAds(o, 0);
+          for (let i = 0; i < n; i++) dev('note', 'anuncios: saqué publicidad de los datos (historias o feed)');
+        }
+      } catch (e) {}
       return o;
     };
     Response.prototype.json = function () { return this.text().then((t) => JSON.parse(t)); };

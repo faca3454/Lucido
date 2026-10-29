@@ -18,7 +18,7 @@
     <string name="dev_data_reset">Reset</string>
     <string name="dev_data_zero">Done: counting from now</string>
     <string name="dev_data_none">This phone doesn\'t report data per app</string>
-    <string name="dev_data_no_pages">IG Lite and YT Lite aren\'t open: open them, use them and check again.</string>
+    <string name="dev_data_no_pages">IG Lite and YT Lite aren\'t open (or you closed them over 30 minutes ago): open them, use them and check again.</string>
     <string name="dev_copy">Copy</string>
     <string name="dev_data_copied">Copied: paste it in the chat.</string>
 </resources>

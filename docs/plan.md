@@ -309,6 +309,16 @@ seguidas sin cuentas que seguís terminan el feed. Lo que se oculta en la págin
 antes de dibujarse. La lista busca tu cuenta en la cookie `ds_user_id` o en `current_user`, y cada falla
 queda anotada en "Datos bajados".
 
+**Séptima prueba (@version 22):** se ve bien pero el inicio tarda mucho en llenarse (una sola publicación y
+la rueda ~15 s: lo más probable, cada página trae pocas de cuentas que seguís); las historias tienen
+publicidad; un video quedó con "Tenemos problemas para reproducir este video" (lo más probable, por los
+pedidos de video descartados). Arreglos en @version 23: los pedidos de video ya no se descartan; se sabe
+de qué video es cada uno (el MediaSource de cada `<video>`, y después por la dirección), al tocar uno salen
+los suyos y, si a los 3 s no arrancó, todos los que esperaban. La publicidad sale de cualquier dato (lo que
+tiene `ad_id`, y `injected_story_units`, que es como Instagram mete las de las historias). "Datos bajados"
+anota cuántas de cuentas que seguís trae cada página y encuentra las páginas aunque hayas cerrado IG Lite
+desde Recientes (siguen vivas 30 minutos).
+
 ### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
 - Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
   entre los dos lados acostados). Video vertical: vertical.

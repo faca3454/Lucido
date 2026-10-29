@@ -108,14 +108,8 @@ object DevTools {
             .setNegativeButton(R.string.done, null).show()
     }
 
-    /** Las páginas de IG Lite y YT Lite, si la pantalla está armada (aunque esté en segundo plano). */
-    private fun openPages(): List<WebView> = MainActivity.Bridge.screen?.window?.decorView?.let(::webViews) ?: emptyList()
-
-    private fun webViews(v: View): List<WebView> = when (v) {
-        is WebView -> listOf(v)
-        is ViewGroup -> (0 until v.childCount).flatMap { webViews(v.getChildAt(it)) }
-        else -> emptyList()
-    }
+    /** Las páginas de IG Lite y YT Lite que siguen vivas (también un rato después de cerrarla desde Recientes). */
+    private fun openPages(): List<WebView> = MainActivity.openPages()
 
     // Si la página no contesta (Android puede no hacerlo si cambia mientras tanto), a los 3 s sigue sin ella
     private suspend fun eval(v: WebView, js: String): Any? = withTimeoutOrNull(3_000) {

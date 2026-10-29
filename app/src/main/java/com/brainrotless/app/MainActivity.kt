@@ -303,6 +303,8 @@ class MainActivity : ComponentActivity() {
         Lang.applyTo(this)
     }
 
+    private fun livePages(): List<WebView> = if (::igWeb.isInitialized) listOfNotNull(igWeb, ytWebOrNull) else emptyList()
+
     /** Una página guardada pasa a esta pantalla. */
     private fun attach(v: WebView) {
         (v.context as? MutableContextWrapper)?.baseContext = this
@@ -814,6 +816,8 @@ class MainActivity : ComponentActivity() {
             main.postDelayed(release, 30 * 60_000L)
         }
 
+        fun open(): List<WebView> = pages?.let { listOfNotNull(it.ig, it.yt) } ?: emptyList()
+
         fun take(): Pages? = pages.also {
             pages = null
             main.removeCallbacks(release)
@@ -1168,5 +1172,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_PAUSE = "pause" // desde la notificación del límite: usar la pausa de emergencia
         const val EXTRA_CHAT = "chat" // desde la notificación de un mensaje: el nombre del chat, para abrirlo
         const val EXTRA_FROM_GUARD = "from_guard" // AppGuard te sacó de la app oficial: quedarse acá
+
+        /** Las páginas de IG Lite y YT Lite que siguen vivas: en la pantalla o guardadas (Kept). Para el APK de prueba. */
+        fun openPages(): List<WebView> = Bridge.screen?.livePages() ?: Kept.open()
     }
 }
