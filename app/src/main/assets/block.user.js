@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      24
+// @version      25
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -970,9 +970,11 @@
     const AD_KEYS = ['adPlacements', 'playerAds', 'adSlots'];
     const strip = (o) => {
       if (!o || typeof o !== 'object') return;
+      let n = 0;
       for (const t of [o, o.playerResponse]) {
-        if (t && typeof t === 'object') for (const k of AD_KEYS) if (k in t) delete t[k];
+        if (t && typeof t === 'object') for (const k of AD_KEYS) if (k in t) { delete t[k]; n++; }
       }
+      if (n) dev('note', 'anuncios: saqué los anuncios de los datos de un video');
     };
     const prune = (o) => { if (Array.isArray(o)) o.forEach(strip); else strip(o); return o; };
     const parse = JSON.parse;

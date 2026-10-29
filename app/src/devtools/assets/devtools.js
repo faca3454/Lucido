@@ -332,7 +332,12 @@
       const like = 'svg[aria-label="Me gusta"], svg[aria-label="Like"], svg[aria-label="Ya no me gusta"], svg[aria-label="Unlike"]';
       const shape = /instagram/.test(location.hostname) && location.pathname === '/'
         ? [`Inicio: ${document.getElementsByTagName('article').length} <article>, ${document.querySelectorAll(like).length} "Me gusta"`] : [];
-      return [name, bytesLine(), videoLine(), ...shape, ...script()].join('\n');
+      // Lo que recibió esta página de los interruptores de Anuncios (y el feed), para ver si llegó el cambio
+      const cfg = window.__noscrollCfg || {};
+      const flag = (on) => (on === false ? 'apagado' : 'prendido');
+      const ads = name === 'Instagram' ? [`Sin anuncios: ${flag(cfg.igBlockAds)} · feed: ${cfg.igFeed || 'normal'}`]
+        : name === 'YouTube' ? [`Sin anuncios: ${flag(cfg.ytBlockAds)}`] : [];
+      return [name, ...ads, bytesLine(), videoLine(), ...shape, ...script()].join('\n');
     },
     reset() {
       for (const k of Object.keys(data)) data[k] = 0;
