@@ -347,7 +347,11 @@ cuentas que seguís", la publicidad se ocultaba igual como "de una cuenta que no
 26: ahí la publicidad la decide solo "Sin anuncios" (la detección de publicidad pasa a ser compartida por las
 secciones 15 y 16). En YouTube el camino (panel → `Rules.build` → recarga → script) está bien en el código y en
 las pruebas; para saber si YouTube no manda anuncios o si el cambio no llega, "Datos bajados" muestra qué valor
-de "Sin anuncios" recibió cada página y anota "YouTube mandó anuncios para un video y quedan".
+de "Sin anuncios" recibió cada página y anota "YouTube mandó anuncios para un video y quedan". Posible causa
+en la app: `shouldOverrideUrlLoading` trataba la navegación de un marco (iframe) de otro sitio como un link
+(lo cortaba y lo abría afuera), y los anuncios de YouTube vienen en marcos de Google (`imasdk.googleapis.com`,
+fuera de `inAppHosts`). Con "Sin anuncios" prendido no se notaba. Ahora los marcos se cargan en su lugar y
+afuera van solo los links que cambian la página entera.
 
 **Navegadores de noche:** un compañero abrió Brave y Chrome con un compromiso y de noche. Hueco encontrado
 (sin poder probarlo en un teléfono): al abrir un navegador, la Accesibilidad manda al inicio y descarta los

@@ -317,6 +317,9 @@ class MainActivity : ComponentActivity() {
         override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
             val u = r.url
             val url = u.toString()
+            // Un marco dentro de la página (un anuncio, un video insertado, un captcha) se carga ahí: afuera van
+            // solo los links que cambian la página entera. Si no, el marco se cortaba y se abría como un link
+            if (!r.isForMainFrame) return u.scheme != "https" && u.scheme != "http"
             if (isYouTube(url) && Lock.yt(this@MainActivity) != null) {
                 if (v === igWeb) backToYouTube = false
                 switchTo(ytWeb); showLockScreen(); return true
