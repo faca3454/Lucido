@@ -51,7 +51,7 @@ class PanelShots : Shots(theme = "PanelTheme") {
 
     @Test fun compromisoActivo() = shot("compromiso_activo", Shots.ALL, { c -> PanelScreen.activeCommitment(c, PanelScreen.ActiveCommitState(
         daysLeft = 9, totalDays = 14, endMillis = millis(today.plusDays(9), 21, 40), usedMs = 38 * min, limitMs = 60 * min,
-        limitMinutes = 60, pausesLeft = 7, canPause = true, usageAccess = true,
+        limitMinutes = 60, pausesLeft = 7, canPause = true, usageAccess = true, history = history, today = today, before = 95 * min,
     ), a) })
 
     @Test fun compromisoPausa() = shot("compromiso_pausa", listOf(BASE, DARK), { c -> PanelScreen.activeCommitment(c, PanelScreen.ActiveCommitState(

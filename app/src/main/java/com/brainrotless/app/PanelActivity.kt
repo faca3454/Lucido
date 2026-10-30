@@ -130,6 +130,9 @@ class PanelActivity : AppCompatActivity() {
             pauseUntil = Commitment.pauseUntil(this).takeIf { Commitment.pauseActive(this) },
             canPause = Commitment.canPause(this),
             usageAccess = usageAccess,
+            history = Usage.history(this),
+            today = Usage.today(this),
+            before = UsageAccess.baseline(this),
             debug = BuildConfig.DEBUG,
             animate = animate,
         )
@@ -201,6 +204,7 @@ class PanelActivity : AppCompatActivity() {
             }.show()
         },
         openUsageAccess = { UsageAccess.open(this) },
+        stats = { open(this, STATS) },
         debugEnd = {
             Commitment.cancelForTesting(this)
             Sleep.reschedule(this)

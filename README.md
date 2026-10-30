@@ -21,8 +21,9 @@ Lúcido es una app para Android que abre Instagram y YouTube sin el scroll infin
 
 **Sin scroll infinito**
 - Los reels y shorts que te mandan tus amigos se ven, pero no podés deslizar al siguiente.
-- El feed de Instagram, a tu elección: normal, solo las cuentas que seguís (en orden, y se termina) o bloqueado.
-- Explorar bloqueado y sin carteles de "Usá la app". Si querés, los videos arrancan solo cuando los tocás (ahorra datos).
+- El feed de Instagram, a tu elección: normal, solo las cuentas que seguís (sin sugerencias, con las historias, y se termina cuando ya viste todo) o bloqueado.
+- Explorar bloqueado y sin carteles de "Usá la app". Si querés, los videos arrancan y se descargan solo cuando los tocás (ahorra datos).
+- Sin anuncios: YouTube sin los de los videos ni los de entre videos, e Instagram sin publicaciones ni historias patrocinadas (se pueden apagar en *Instagram y YouTube*).
 
 **Modo dormir y modo foco**
 - **De noche**, en tu horario (puede ser distinto cada día): Instagram queda solo para mensajes, YouTube se bloquea y, si querés, también los navegadores. Te avisa unos minutos antes.
@@ -38,6 +39,7 @@ Lúcido es una app para Android que abre Instagram y YouTube sin el scroll infin
 **Estadísticas**
 - Antes vs ahora: cuánto usabas Instagram y YouTube antes de Lúcido y cuánto ahora.
 - Uso por día, Instagram vs YouTube, rachas y un resumen los domingos.
+- Desde el inicio, la pantalla del compromiso, Ajustes, los widgets o manteniendo presionado IG Lite o YT Lite (*Estadísticas*). Así se llega aunque tengas escondido el ícono de Lúcido.
 
 **Notificaciones**
 - Los mensajes de Instagram y YouTube se abren en Lúcido, no en las apps oficiales.
@@ -47,6 +49,7 @@ Lúcido es una app para Android que abre Instagram y YouTube sin el scroll infin
 - Vuelven al instante a donde estabas, y las notificaciones abren el chat directo.
 - Los links de afuera se abren encima, sin salir. Fotos desde la galería, audios con el micrófono y la pantalla prendida mientras ves un video.
 - Deslizar para responder en los chats.
+- Videos de YouTube en pantalla completa como en la app oficial: acostados aunque tengas el teléfono derecho y, con la rotación prendida, acostar el teléfono los pone en pantalla completa.
 
 **Y además**
 - Aviso cuando llevás mucho rato seguido.
@@ -95,5 +98,7 @@ Para qué es cada permiso (ninguno se pide hasta que activás la función que lo
 - **Acceso a datos de uso** (*Estadísticas*): para leer cuánto usabas Instagram y YouTube oficiales antes de instalar Lúcido, para el "antes vs ahora".
 - **Micrófono** (*audios en los chats*): solo cuando grabás un audio en Instagram. Android lo pregunta la primera vez.
 - **Notificaciones** (*modo dormir, compromiso, mensajes y resumen semanal*): para avisarte antes del modo dormir, cuando llegás al límite y el resumen de los domingos.
+
+Con *Solo cuentas que seguís*, el inicio muestra el feed de la pestaña Seguidos de Instagram, y Lúcido le pide la lista de cuentas que seguís (la misma que ves en tu perfil) para sacar lo que se cuele. La lista queda guardada en el teléfono un día y no va a ningún otro lado.
 
 Las reglas de bloqueo se descargan de este repositorio por HTTPS para seguir funcionando cuando Instagram o YouTube cambian algo. Si preferís que no, apagá *Actualizar reglas de bloqueo* en Ajustes.

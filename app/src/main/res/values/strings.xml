@@ -159,6 +159,11 @@
     <string name="pref_tap">Videos solo al tocar</string>
     <string name="pref_tap_summary">Ahorra datos: los videos no arrancan solos. Los reels que te mandan, sí</string>
     <string name="pref_cat_comfort">Comodidad</string>
+    <string name="pref_cat_ads">Anuncios</string>
+    <string name="pref_ig_ads">Sin anuncios en Instagram</string>
+    <string name="pref_ig_ads_summary">Saca las publicaciones y las historias patrocinadas</string>
+    <string name="pref_yt_ads">Sin anuncios en YouTube</string>
+    <string name="pref_yt_ads_summary">Saca los anuncios de los videos y los videos patrocinados</string>
     <string name="pref_smooth">Transiciones suaves</string>
     <string name="pref_smooth_summary">Fundido corto al cambiar de página. Mientras dura, no responde a los toques</string>
     <string name="pref_swipe">Deslizar para responder (experimental)</string>
@@ -242,7 +247,7 @@
     <string name="panel_pauses_sub">Máximo 2 por día</string>
     <string name="panel_extras">Extras</string>
     <string name="panel_apps">Instagram y YouTube</string>
-    <string name="panel_apps_summary">Feed, videos, comodidad y apps oficiales</string>
+    <string name="panel_apps_summary">Feed, videos, anuncios, comodidad y apps oficiales</string>
     <string name="panel_days_minus">Un día menos</string>
     <string name="panel_days_plus">Un día más</string>
     <string name="panel_back">Volver</string>
@@ -310,6 +315,7 @@
     <string name="stats_split_none">Desde ahora, Lúcido separa cuánto es Instagram y cuánto YouTube.</string>
     <string name="stats_empty">Todavía no hay uso registrado. Usá Instagram o YouTube desde Lúcido y acá vas a ver cómo te va.</string>
     <string name="stats_open">Ver estadísticas</string>
+    <string name="stats_brief_empty">Cuánto usás cada día, y antes vs ahora</string>
     <string name="summary_charts">Ver gráficos</string>
     <plurals name="stats_avg_days">
         <item quantity="one">promedio de 1 día</item>

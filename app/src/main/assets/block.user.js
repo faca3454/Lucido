@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lúcido
 // @description  Bloquea el feed de Reels/Shorts pero deja ver los que te mandan
-// @version      15
+// @version      26
 // @match        *://*.instagram.com/*
 // @match        *://instagram.com/*
 // @match        *://*.youtube.com/*
@@ -18,7 +18,7 @@
   // --- Config (la app la inyecta desde Ajustes; en Safari/Userscripts usa estos valores) ---
   const DEFAULTS = {
     igFeed: 'normal', igBlockExplore: true, igTapToPlay: false, igReels: false, ytShorts: false,
-    restricted: false, restrictedMsg: '', smooth: false, swipeReply: false,
+    restricted: false, restrictedMsg: '', smooth: false, swipeReply: false, igBlockAds: true, ytBlockAds: true,
   };
   const config = (given) => {
     const c = Object.assign({}, DEFAULTS, given || {});
@@ -50,7 +50,7 @@
     return SMOOTH + (IG
       ? (hidden.length ? `${hidden.join(', ')} { display:none !important; }` : '') +
         (CFG.restricted ? 'a[href="/"], video { display:none !important; }' : '')
-      : CFG.ytShorts ? '' : `
+      : (CFG.ytShorts ? '' : `
         ytm-reel-shelf-renderer, ytm-shorts-lockup-view-model,
         ytm-rich-item-renderer:has(a[href^="/shorts/"]),
         ytm-video-with-context-renderer:has(a[href^="/shorts/"]),
@@ -59,7 +59,19 @@
         ytd-rich-item-renderer:has(a[href^="/shorts/"]),
         ytd-guide-entry-renderer:has(a[title="Shorts"]),
         ytd-mini-guide-entry-renderer[aria-label="Shorts"]
-        { display:none !important; }`);
+        { display:none !important; }`) +
+        // Anuncios entre los videos, en la búsqueda, debajo del reproductor y encima del video (sección 15)
+        (CFG.ytBlockAds ? `
+        ad-slot-renderer, ytm-rich-item-renderer:has(ad-slot-renderer),
+        ytm-promoted-sparkles-web-renderer, ytm-promoted-sparkles-text-search-renderer,
+        ytm-promoted-video-renderer, ytm-companion-ad-renderer, ytm-companion-slot,
+        ytm-brand-video-singleton-renderer, ytm-brand-video-shelf-renderer,
+        ytd-ad-slot-renderer, ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
+        ytd-in-feed-ad-layout-renderer, ytd-promoted-sparkles-web-renderer, ytd-banner-promo-renderer,
+        ytd-statement-banner-renderer, ytd-companion-slot-renderer, ytd-action-companion-ad-renderer,
+        ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"],
+        #masthead-ad, #player-ads, .ytp-ad-overlay-container, .ytp-ad-image-overlay
+        { display:none !important; }` : ''));
   };
   let style = null;
   const addStyle = () => {
@@ -73,6 +85,48 @@
   // Los APK de prueba ponen antes sus herramientas (devtools.js, que no va en la versión publicada): les
   // cuenta lo que hace el script por su cuenta, cuándo ya se ve la página y si no encontró "Responder"
   const dev = (what, x) => { if (window.__lucidoDev) window.__lucidoDev.on(what, x); };
+
+  // Publicaciones del feed de Instagram (secciones 15 y 16): cada una es un <article>; si en esa página no los
+  // usa, el contenedor más grande con un solo botón de "Me gusta" (y no más alto que dos pantallas y media)
+  const LIKE = 'svg[aria-label="Me gusta"], svg[aria-label="Like"], svg[aria-label="Ya no me gusta"], svg[aria-label="Unlike"]';
+  const feedPosts = () => {
+    const articles = document.getElementsByTagName('article');
+    if (articles.length) return [...articles];
+    const out = new Set();
+    for (const like of document.querySelectorAll(LIKE)) {
+      let p = like;
+      for (let up = p.parentElement; up && up !== document.body && up.querySelectorAll(LIKE).length === 1 &&
+        up.getBoundingClientRect().height < innerHeight * 2.5; up = up.parentElement) p = up;
+      if (p !== like) out.add(p);
+    }
+    return [...out];
+  };
+  const hasPosts = (el) => !!el.querySelector('article, ' + LIKE);
+  // Publicidad de Instagram (secciones 15 y 16): la etiqueta "Publicidad" entre los primeros textos de root;
+  // puede venir partida en varios elementos chicos
+  const AD = /^(publicidad|patrocinado|sponsored|ad|anuncio|publicidade|sponsoris[ée]|sponsorizzato|gesponsert)$/i;
+  const adLabel = (root, max) => {
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n, i = 0; (n = walk.nextNode()) && i < max; i++) {
+      for (let el = n.parentElement, up = 0; el && up < 3 && el !== root; el = el.parentElement, up++) {
+        const t = el.textContent;
+        if (t.length > 40) break;
+        if (AD.test(t.replace(/\s+/g, ' ').trim())) return el;
+      }
+    }
+    return null;
+  };
+  // Una publicación lleva la etiqueta arriba, junto al nombre. Un <article> con otros adentro, o más alto que
+  // dos pantallas, es una lista: ocultarlo se llevaría el feed entero
+  const isAd = (post) => {
+    if (post.querySelector('article') || post.querySelectorAll(LIKE).length > 1) return false;
+    const box = post.getBoundingClientRect();
+    if (box.height > innerHeight * 2.5) return false;
+    const el = adLabel(post, 40);
+    return !!el && el.getBoundingClientRect().top - box.top < 120;
+  };
+  // Las cuentas que seguís (sección 16), en minúsculas, para filtrar el feed (secciones 16 y 18). null si no se sabe
+  let igFollowed = null;
 
   // Lo que una sección rehace al cambiar la URL: corre ahora y después en cada cambio (desde check)
   const onRoute = [];
@@ -170,9 +224,8 @@
 
   // --- 3. Guardia de URL (respaldo; no depende del DOM) ---
   let allowedReel = null;
-  let prevFollowing = false; // veníamos del feed de seguidos
   let lastPath = null;
-  const check = (nav) => {
+  const check = () => {
     const p = location.pathname;
     if (p !== lastPath) { lastPath = p; for (const f of onRoute) f(); }
 
@@ -199,15 +252,6 @@
       return;
     }
 
-    // Feed de inicio -> solo cuentas que seguís. Si Instagram limpia la URL después de
-    // cargar (replaceState a "/"), sigue siendo el feed de seguidos: no redirigir.
-    const following = p === '/' && /[?&]variant=following(&|$)/.test(location.search);
-    if (nav) prevFollowing = false;
-    if (CFG.igFeed === 'following' && p === '/' && !following && !prevFollowing) {
-      location.replace('/?variant=following');
-      return;
-    }
-    prevFollowing = following || (p === '/' && prevFollowing);
     const m = p.match(/^\/reels?\/([\w-]+)/);
     if (!m || CFG.igReels) { allowedReel = null; return; }
     const id = m[1];
@@ -220,27 +264,9 @@
 
   for (const k of ['pushState', 'replaceState']) {
     const orig = history[k];
-    history[k] = function (...a) { const r = orig.apply(this, a); check(k === 'pushState'); return r; };
+    history[k] = function (...a) { const r = orig.apply(this, a); check(); return r; };
   }
-  // Tocar "Inicio" va directo al feed de seguidos, sin mostrar el otro un instante. Se navega dentro
-  // del sitio, como el botón atrás; si en 1 s lo que estaba en pantalla sigue ahí, se recarga.
-  if (IG && CFG.igFeed === 'following') {
-    const FOLLOWING = '/?variant=following';
-    addEventListener('click', (e) => {
-      if (!(e.target.closest && e.target.closest('a[href="/"]'))) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (location.pathname === '/') { location.assign(FOLLOWING); return; } // ya en el feed: recargarlo
-      const before = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-      history.pushState(null, '', FOLLOWING);
-      dispatchEvent(new PopStateEvent('popstate', { state: null }));
-      setTimeout(() => {
-        if (location.pathname === '/' && before && before.isConnected && before.getClientRects().length)
-          location.assign(FOLLOWING);
-      }, 1000);
-    }, true);
-  }
-  addEventListener('popstate', () => check(true));
+  addEventListener('popstate', () => check());
   // Respaldo por si la SPA cambia la URL por otra vía. Lo normal lo atrapan los hooks y popstate,
   // así que alcanza con mirar cada tanto (antes era cada 400 ms, también mientras scrolleás)
   setInterval(check, 3000);
@@ -273,19 +299,154 @@
   }
 
   // --- 5. Videos solo al tocar (Instagram, opcional) ---
-  // Los videos no arrancan ni se precargan hasta que los tocás. Los reels e historias
+  // Los videos no arrancan ni se descargan hasta que los tocás. Los reels e historias
   // que abrís arrancan solos: ya tocaste para abrirlos.
   if (IG && CFG.igTapToPlay) {
     const tapped = new WeakSet();
     const badges = new WeakMap();
+    const viewerPage = () => /^\/(reels?|stories)\//.test(location.pathname);
+    // Un reel que te mandan se abre encima del chat, a veces sin cambiar la URL: se lo reconoce porque pasa
+    // de un video a otro deslizando para arriba. Los carruseles del feed se deslizan de costado: no cuentan
     const inViewer = (v) => {
-      if (/^\/(reels?|stories)\//.test(location.pathname)) return true;
+      if (viewerPage()) return true;
+      if (!v.isConnected || !/^\/direct\//.test(location.pathname)) return false;
       for (let el = v.parentElement; el && el.nodeType === 1; el = el.parentElement) {
-        if (getComputedStyle(el).scrollSnapType !== 'none') return true; // visor encima del chat
+        if (/^(y|block|both)/.test(getComputedStyle(el).scrollSnapType)) return true;
       }
       return false;
     };
     const allowed = (v) => !(v instanceof HTMLVideoElement) || tapped.has(v) || inViewer(v);
+
+    // Frenar la reproducción no alcanza: el reproductor de Instagram baja los videos por su cuenta (pide
+    // los pedazos al servidor, no el <video>). Esos pedidos pasan mientras se ve un video permitido, en un
+    // reel o una historia, o recién tocaste algo en un chat (los reels que te mandan se abren encima, sin
+    // cambiar la URL). Si no, esperan. Al abrirse pasan los últimos (los de los videos que tenés cerca) y
+    // los de antes se descartan, como si se hubiera cortado la conexión.
+    // Mientras ves el que tocaste, el comienzo de los otros (bytestart=0: Instagram los adelanta por si bajás)
+    // sigue esperando; los pedazos que siguen del tuyo pasan
+    const playing = new Set(); // audios y videos permitidos que arrancaron
+    let chatTap = -Infinity, tapAt = -Infinity;
+    const isOpen = (url) => {
+      if (viewerPage() || (/^\/direct\//.test(location.pathname) && performance.now() - chatTap < 3000)) return true;
+      for (const m of playing) if (m.paused || m.ended) playing.delete(m);
+      if (!playing.size) return false;
+      return !(url && /[?&]bytestart=0(&|$)/.test(url) && performance.now() - tapAt > 2000);
+    };
+    const isVideo = (url) => {
+      try {
+        const u = new URL(url, location.href);
+        return /(^|\.)(cdninstagram\.com|fbcdn\.net)$/.test(u.hostname) && /\.(mp4|m4v|m4a|webm)$/i.test(u.pathname);
+      } catch (e) {
+        return false;
+      }
+    };
+    // De qué video es cada pedido: Instagram arma cada video con un MediaSource (src = blob:) y pide sus pedazos
+    // apenas le agrega un SourceBuffer; después, los de la misma dirección son del mismo video. Así, al tocar
+    // uno salen sus pedidos y no los de los demás, que siguen esperando (descartarlos dejaba a esos videos con
+    // "Tenemos problemas para reproducir este video")
+    const blobs = new Map(), msVideo = new WeakMap(), pathVideo = new Map();
+    let attaching = null; // { video, at }: al que se le acaba de agregar un SourceBuffer
+    if (typeof MediaSource !== 'undefined') {
+      const createURL = URL.createObjectURL;
+      URL.createObjectURL = function (o) {
+        const u = createURL.apply(this, arguments);
+        if (o instanceof MediaSource) { blobs.set(u, o); if (blobs.size > 50) blobs.delete(blobs.keys().next().value); }
+        return u;
+      };
+      const add = MediaSource.prototype.addSourceBuffer;
+      MediaSource.prototype.addSourceBuffer = function () {
+        const v = msVideo.get(this);
+        if (v) attaching = { video: v, at: performance.now() };
+        return add.apply(this, arguments);
+      };
+    }
+    const attach = (m, src) => { const ms = blobs.get(String(src)); if (ms) msVideo.set(ms, m); };
+    const ownerOf = (url) => {
+      let path;
+      try { path = new URL(url, location.href).pathname; } catch (e) { return null; }
+      let v = pathVideo.get(path);
+      if (!v && attaching && performance.now() - attaching.at < 1500) {
+        v = attaching.video;
+        pathVideo.set(path, v);
+        if (pathVideo.size > 300) pathVideo.delete(pathVideo.keys().next().value);
+      }
+      return v || null;
+    };
+
+    const KEEP = 2;
+    let held = []; // { send, owner }, en el orden en que llegaron
+    const hold = (h, url) => { h.owner = ownerOf(url); held.push(h); dev('video', 'held'); };
+    const send = (list, why) => {
+      if (!list.length) return;
+      held = held.filter((h) => !list.includes(h));
+      dev('note', `videos solo al tocar: salieron los pedidos (${why})`);
+      for (const h of list) h.send();
+    };
+    // Los del video que arrancó; si no se sabe de quién es cada uno, los últimos (los de los videos de cerca)
+    const release = (why, video) => {
+      if (!held.length || !isOpen()) return;
+      const mine = video ? held.filter((h) => h.owner === video) : [];
+      send(mine.length ? mine : held.slice(-KEEP), why);
+    };
+    const play0 = (m) => {
+      if (playing.has(m)) return;
+      playing.add(m);
+      release(!(m instanceof HTMLVideoElement) ? 'un audio' : tapped.has(m) ? 'tocaste un video' : 'un reel o una historia', m);
+    };
+
+    const fetch0 = window.fetch;
+    window.fetch = function (input, init) {
+      const url = input instanceof Request ? input.url : String(input);
+      const signal = (init && init.signal) || (input instanceof Request ? input.signal : null);
+      if (isOpen(url) || !isVideo(url) || (signal && signal.aborted)) return fetch0.apply(window, arguments);
+      const args = arguments;
+      return new Promise((resolve, reject) => {
+        const off = () => { if (signal) signal.removeEventListener('abort', abort); };
+        const h = { send: () => { off(); dev('video', 'sent'); fetch0.apply(window, args).then(resolve, reject); } };
+        // Instagram ya no lo quiere (pasaste de largo): se olvida
+        const abort = () => { held = held.filter((x) => x !== h); reject(signal.reason || new DOMException('Aborted', 'AbortError')); };
+        if (signal) signal.addEventListener('abort', abort);
+        hold(h, url);
+      });
+    };
+    const xhr = XMLHttpRequest.prototype, xopen = xhr.open, xsend = xhr.send, xabort = xhr.abort;
+    const xurl = new WeakMap(), xheld = new WeakMap();
+    const forget = (x) => { const h = xheld.get(x); if (h) { xheld.delete(x); held = held.filter((y) => y !== h); } };
+    xhr.open = function (method, url) { forget(this); xurl.set(this, String(url)); return xopen.apply(this, arguments); };
+    xhr.abort = function () { forget(this); return xabort.apply(this, arguments); };
+    xhr.send = function () {
+      const url = xurl.get(this) || '';
+      if (isOpen(url) || !isVideo(url)) return xsend.apply(this, arguments);
+      const x = this, args = arguments;
+      const h = { send: () => { xheld.delete(x); dev('video', 'sent'); xsend.apply(x, args); } };
+      xheld.set(x, h);
+      hold(h, url);
+    };
+    route(() => release('abriste un reel o una historia'));
+    addEventListener('click', (e) => {
+      if (!e.isTrusted || !/^\/direct\//.test(location.pathname)) return;
+      chatTap = performance.now();
+      release('tocaste algo en un chat');
+    }, true);
+
+    // Desde que se crea el video, sin precarga ni arranque solo (React los pone con setAttribute)
+    const prop = (k, off) => {
+      const d = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, k);
+      Object.defineProperty(HTMLMediaElement.prototype, k, { ...d, set(x) { d.set.call(this, allowed(this) ? x : off); } });
+    };
+    prop('preload', 'none');
+    prop('autoplay', false);
+    const srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+    Object.defineProperty(HTMLMediaElement.prototype, 'src', { ...srcDesc, set(x) { attach(this, x); srcDesc.set.call(this, x); } });
+    const setAttr = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (name, value) {
+      if (this instanceof HTMLMediaElement && /^src$/i.test(name)) attach(this, value);
+      if (this instanceof HTMLVideoElement && /^(preload|autoplay)$/i.test(name) && !allowed(this)) {
+        if (/^autoplay$/i.test(name)) return;
+        value = 'none';
+      }
+      return setAttr.call(this, name, value);
+    };
 
     const showBadge = (v) => {
       const parent = v.parentElement;
@@ -304,18 +465,22 @@
 
     const play = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function () {
-      if (allowed(this)) return play.call(this);
+      if (allowed(this)) {
+        const p = play.call(this);
+        play0(this); // después: recién ahí deja de estar en pausa
+        return p;
+      }
       showBadge(this);
       return Promise.reject(new DOMException('Tocá el video para reproducirlo', 'NotAllowedError'));
     };
     // Por si arranca por el atributo autoplay, sin pasar por play()
     addEventListener('play', (e) => {
-      if (allowed(e.target)) { hideBadge(e.target); return; }
+      if (allowed(e.target)) { hideBadge(e.target); play0(e.target); return; }
       e.target.pause();
       showBadge(e.target);
     }, true);
 
-    // Sin precarga: no gasta datos hasta que lo tocás
+    // El ▶ en los videos frenados (y, por las dudas, sin precarga si llegó por otro lado)
     let pending = false;
     new MutationObserver(() => {
       if (pending) return;
@@ -323,7 +488,9 @@
       setTimeout(() => {
         pending = false;
         for (const v of document.getElementsByTagName('video')) {
-          if (v.preload !== 'none' && !allowed(v)) { v.autoplay = false; v.preload = 'none'; showBadge(v); }
+          if (allowed(v)) continue;
+          if (v.preload !== 'none') { v.autoplay = false; v.preload = 'none'; }
+          showBadge(v);
         }
       }, 200);
     }).observe(document, { childList: true, subtree: true }); // document: el <html> puede no existir todavía
@@ -339,8 +506,12 @@
         e.stopPropagation();
         dev('note', 'videos al tocar: frené el toque y reproduje el video');
         tapped.add(v);
+        tapAt = performance.now();
         v.preload = 'auto';
         v.play().catch(() => {});
+        // Si a los 3 s sigue esperando datos, salen todos los pedidos que esperaban: mejor gastar un poco que un
+        // video trabado (no se supo de cuál era cada uno)
+        setTimeout(() => { if (!v.paused && v.readyState < 3 && held.length) send(held.slice(), 'el que tocaste no arrancaba'); }, 3000);
         return;
       }
     }, true);
@@ -810,4 +981,524 @@
       return false;
     }
   };
+
+  // --- 15. Sin anuncios (YouTube e Instagram; se pueden apagar) ---
+  // YouTube, con la receta de uBlock Origin (sin su código): los anuncios de un video vienen en los datos
+  // del video (adPlacements, playerAds, adSlots) y se borran antes de que el reproductor los lea, lleguen
+  // con la página (ytInitialPlayerResponse) o en un pedido (JSON.parse, Response.json). Si igual aparece
+  // uno, se silencia, se acelera y se toca "Omitir"; al terminar, el video vuelve a como estaba. Los de
+  // entre videos, con CSS (sección 1). Si YouTube cambia la forma: mirar qué cambió uBlock Origin en sus
+  // filtros de youtube.com.
+  if (YT && CFG.ytBlockAds) {
+    const AD_KEYS = ['adPlacements', 'playerAds', 'adSlots'];
+    const strip = (o) => {
+      if (!o || typeof o !== 'object') return;
+      let n = 0;
+      for (const t of [o, o.playerResponse]) {
+        if (t && typeof t === 'object') for (const k of AD_KEYS) if (k in t) { delete t[k]; n++; }
+      }
+      if (n) dev('note', 'anuncios: saqué los anuncios de los datos de un video');
+    };
+    const prune = (o) => { if (Array.isArray(o)) o.forEach(strip); else strip(o); return o; };
+    const parse = JSON.parse;
+    JSON.parse = function () { return prune(parse.apply(this, arguments)); };
+    const json = Response.prototype.json;
+    Response.prototype.json = function () { return json.apply(this, arguments).then(prune); };
+    let initial;
+    try {
+      Object.defineProperty(window, 'ytInitialPlayerResponse', {
+        configurable: true, get: () => initial, set: (v) => { initial = prune(v); },
+      });
+    } catch (e) {}
+
+    const SKIP = '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, [class*="skip-ad"], [class*="ad-skip"]';
+    const before = new WeakMap(); // sonido y velocidad del video antes del anuncio
+    const skipAd = (e) => {
+      const v = e.target;
+      if (!(v instanceof HTMLVideoElement)) return;
+      const ad = v.closest('.ad-showing, .ad-interrupting');
+      if (!ad) {
+        const b = before.get(v);
+        if (b) { before.delete(v); v.muted = b.muted; v.playbackRate = b.rate; }
+        return;
+      }
+      if (!before.has(v)) { before.set(v, { muted: v.muted, rate: v.playbackRate }); dev('note', 'anuncios: salteé uno de YouTube'); }
+      v.muted = true;
+      v.playbackRate = 16; // sin saltar al final: si el anuncio viene pegado al video, se saltearía el video también
+      const btn = ad.querySelector(SKIP);
+      if (btn) btn.click();
+    };
+    for (const type of ['loadedmetadata', 'playing', 'timeupdate']) addEventListener(type, skipAd, true);
+  } else if (YT && window.__lucidoDev) {
+    // APK de prueba con "Sin anuncios" apagado: anotar si YouTube manda anuncios (quedan). Así se sabe si no
+    // aparecen porque YouTube no los manda
+    const sent = (t) => !!t && typeof t === 'object' &&
+      ['adPlacements', 'playerAds', 'adSlots'].some((k) => Array.isArray(t[k]) && t[k].length > 0);
+    const note = (o) => {
+      try {
+        if ((Array.isArray(o) ? o : [o]).some((x) => sent(x) || sent(x && x.playerResponse)))
+          dev('note', 'anuncios: YouTube mandó anuncios para un video y quedan ("Sin anuncios" apagado)');
+      } catch (e) {}
+      return o;
+    };
+    const parse = JSON.parse;
+    JSON.parse = function () { return note(parse.apply(this, arguments)); };
+    const json = Response.prototype.json;
+    Response.prototype.json = function () { return json.apply(this, arguments).then(note); };
+    let initial;
+    try {
+      Object.defineProperty(window, 'ytInitialPlayerResponse', {
+        configurable: true, get: () => initial, set: (v) => { initial = note(v); },
+      });
+    } catch (e) {}
+  }
+
+  // Instagram: las publicaciones con "Publicidad" se ocultan y las historias patrocinadas se saltean. Por el
+  // texto de la etiqueta, que va arriba junto al nombre (como los carteles de "Usá la app", sección 6).
+  if (IG && CFG.igBlockAds) {
+    // Se achica a nada sin sacarla de la página: si una publicación desaparece (display:none), Instagram deja
+    // de cargar las que siguen
+    let styled = false;
+    const hidePost = (post) => {
+      if (post.hasAttribute('data-lucido-ad') || !isAd(post)) return;
+      if (!styled) {
+        styled = true;
+        const s = document.createElement('style');
+        s.textContent = '[data-lucido-ad] { height:1px !important; min-height:0 !important; margin:0 !important; ' +
+          'padding:0 !important; border:0 !important; overflow:hidden !important; visibility:hidden !important; }';
+        (document.head || document.documentElement).appendChild(s);
+      }
+      post.setAttribute('data-lucido-ad', '');
+      dev('note', 'anuncios: oculté una publicación');
+    };
+
+    // Historia patrocinada: la etiqueta arriba y a la vista, en cualquier parte de la página (debajo de las
+    // historias puede seguir el feed, con cientos de textos antes)
+    const storyLabel = () => {
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n; (n = walk.nextNode());) {
+        if (n.data.length > 40) continue;
+        for (let el = n.parentElement, up = 0; el && up < 3; el = el.parentElement, up++) {
+          const t = el.textContent;
+          if (t.length > 40) break;
+          if (!AD.test(t.replace(/\s+/g, ' ').trim())) continue;
+          const r = el.getBoundingClientRect();
+          const seen = !el.checkVisibility || el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
+          if (r.height > 4 && r.top >= 0 && r.top < innerHeight * 0.3 && seen) return el;
+          break;
+        }
+      }
+      return null;
+    };
+    // Se avanza a la que sigue: "Siguiente" si está (si no, un toque en el costado derecho, como un dedo:
+    // táctil, puntero y click); al segundo intento, la flecha del teclado; al tercero, el toque
+    const tapRight = () => {
+      const x = innerWidth * 0.9, y = innerHeight / 2, target = document.elementFromPoint(x, y);
+      if (!target) return;
+      const at = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y };
+      const touch = typeof Touch === 'function' && new Touch({ identifier: 9995, target, clientX: x, clientY: y, pageX: x, pageY: y });
+      for (const type of ['pointerdown', 'touchstart', 'pointerup', 'touchend', 'mousedown', 'mouseup', 'click']) {
+        if (type.startsWith('touch')) {
+          if (!touch) continue;
+          const now = type === 'touchstart' ? [touch] : [];
+          target.dispatchEvent(new TouchEvent(type, { ...at, touches: now, targetTouches: now, changedTouches: [touch] }));
+        } else {
+          target.dispatchEvent(type.startsWith('pointer')
+            ? new PointerEvent(type, { ...at, pointerId: 9996, pointerType: 'touch', isPrimary: true })
+            : new MouseEvent(type, at));
+        }
+      }
+    };
+    const tries = new WeakMap(); // etiqueta → [intentos, último]
+    const skipStory = () => {
+      const el = document.body && storyLabel();
+      if (!el) return;
+      const [n, last] = tries.get(el) || [0, -Infinity];
+      if (n >= 3 || performance.now() - last < 1500) return;
+      tries.set(el, [n + 1, performance.now()]);
+      dev('note', `anuncios: salteé una historia patrocinada (intento ${n + 1})`);
+      const next = [...document.querySelectorAll('[aria-label]')].find((b) =>
+        /^(siguiente|next)$/i.test(b.getAttribute('aria-label').trim()) && b.getBoundingClientRect().height > 0);
+      if (n === 0 && next) next.click();
+      else if (n === 1) {
+        (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown',
+          { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, which: 39, bubbles: true, cancelable: true }));
+      } else tapRight();
+      // Si no cambió nada en la página, igual se vuelve a mirar
+      setTimeout(() => { if (/^\/stories\//.test(location.pathname)) skipStory(); }, 1600);
+    };
+
+    // Se mira lo que se agregó, cuando el navegador está libre; en las historias, la parte de arriba
+    let added = [], scheduled = false;
+    const idle = window.requestIdleCallback ? (f) => requestIdleCallback(f, { timeout: 500 }) : (f) => setTimeout(f, 200);
+    const sweep = () => {
+      scheduled = false;
+      const nodes = added;
+      added = [];
+      if (/^\/stories\//.test(location.pathname)) return skipStory();
+      if (!nodes.length) return;
+      for (const p of feedPosts()) hidePost(p); // pocas (Instagram tiene en la página solo las de cerca)
+    };
+    new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type === 'characterData') { added.push(r.target); continue; }
+        for (const n of r.addedNodes) {
+          added.push(n);
+          // Una publicación nueva, apenas aparece (antes de que se dibuje: si se achica después, la pantalla salta)
+          if (n.nodeType === 1) for (const post of n.tagName === 'ARTICLE' ? [n] : n.getElementsByTagName('article')) hidePost(post);
+        }
+      }
+      if (!scheduled && added.length) { scheduled = true; idle(sweep); }
+    }).observe(document, { childList: true, subtree: true, characterData: true }); // document: el <html> puede no existir todavía
+  }
+
+  // --- 16. Solo cuentas que seguís (Instagram) ---
+  // El inicio normal de Instagram, con su fila de historias (que pasa de una persona a otra, sin recargar),
+  // sin lo que no es de cuentas que seguís. Instagram mezcla recomendaciones sin marcarlas, así que se compara
+  // el autor de cada publicación con la lista de cuentas que seguís (la de tu perfil, que se le pide a Instagram
+  // y se guarda en el teléfono un día). Además, las que dicen "Seguir" o "Sugerencia para ti" arriba, los
+  // carruseles de sugerencias y, desde "Estás al día", todo lo que sigue (son sugerencias): ahí termina. Las de
+  // antes del final se achican a 1 px sin salir de la página (si una desaparece, Instagram deja de cargar las
+  // que siguen); las de después desaparecen, justamente para que deje de cargar sugerencias. Las publicaciones
+  // ya vienen del feed de Seguidos (sección 18): esto ataja lo que se cuele
+  if (IG && CFG.igFeed === 'following') {
+    const FOLLOW = /^(seguir|follow)$/i;
+    const SUGGESTED = /^(sugerencias? para ti|suggested for you|sugerido para ti|publicaci[oó]n sugerida|suggested post|publicaciones sugeridas|suggested posts|reels sugeridos|suggested reels)$/i;
+    const END = /(est[aá]s al d[ií]a|ya viste todo|all caught up|completely caught up|viste todas las publicaciones|seen all new posts)/i;
+    const onHome = () => location.pathname === '/' && !CFG.restricted;
+    const API = { credentials: 'include', headers: { 'X-IG-App-ID': '936619743392459', 'X-Requested-With': 'XMLHttpRequest' } };
+
+    // Las cuentas que seguís, y la tuya (tus publicaciones también van). null mientras no se sabe
+    const KEY = 'brl_following';
+    let asking = false, askedAt = -Infinity;
+    try {
+      const c = JSON.parse(localStorage.getItem(KEY));
+      if (c && Date.now() - c.at < 864e5 && c.users.length) igFollowed = new Set(c.users);
+    } catch (e) {}
+    const ask = async () => {
+      if (igFollowed || asking || Date.now() - askedAt < 5 * 60e3) return; // si falló, de nuevo en 5 minutos
+      asking = true;
+      askedAt = Date.now();
+      try {
+        // Tu cuenta: el número, de la cookie de la sesión o preguntándole a Instagram (que da también tu nombre)
+        let id = (document.cookie.match(/(?:^|;\s*)ds_user_id=(\d+)/) || [])[1], me = '';
+        const r0 = await fetch('/api/v1/accounts/current_user/?edit=true', API);
+        const j0 = r0.ok ? await r0.json().catch(() => null) : null;
+        if (j0 && j0.user) { id = id || String(j0.user.pk || j0.user.pk_id || ''); me = j0.user.username || ''; }
+        if (!id) return dev('note', `seguidos: no pude saber cuál es tu cuenta (Instagram respondió ${r0.status})`);
+        const users = me ? [me.toLowerCase()] : [];
+        let max = '';
+        for (let page = 0; page < 50; page++) { // hasta 10.000 cuentas
+          const r = await fetch(`/api/v1/friendships/${id}/following/?count=200${max ? '&max_id=' + encodeURIComponent(max) : ''}`, API);
+          if (!r.ok) return dev('note', `seguidos: Instagram no dio la lista (respondió ${r.status})`);
+          const j = await r.json();
+          for (const u of j.users || []) if (u && u.username) users.push(u.username.toLowerCase());
+          if (!j.next_max_id) break;
+          max = j.next_max_id;
+        }
+        if (users.length <= (me ? 1 : 0)) return dev('note', 'seguidos: la lista vino vacía');
+        igFollowed = new Set(users);
+        try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), users })); } catch (e) {}
+        dev('note', `seguidos: la lista tiene ${users.length - (me ? 1 : 0)} cuentas`);
+        later();
+      } catch (e) {
+        dev('note', 'seguidos: no pude traer la lista de cuentas que seguís (' + String(e && e.message).slice(0, 60) + ')');
+      } finally {
+        asking = false;
+      }
+    };
+
+    // Un texto corto que cumple test, entre los primeros max de root (y que no esté en skip)
+    const find = (root, test, max, skip) => {
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n, i = 0; (n = walk.nextNode()) && i < max; i++) {
+        const t = n.data.length <= 80 && n.data.trim();
+        if (t && test.test(t) && !(skip && skip(n.parentElement))) return n.parentElement;
+      }
+      return null;
+    };
+    // Los autores: los links a perfiles de arriba, junto a la foto (una publicación en colaboración tiene varios)
+    const NOT_USER = /^(explore|reels?|p|stories|direct|accounts|about|legal|tv|web|challenge)$/;
+    const authors = (post, top) => {
+      const out = [];
+      for (const a of post.querySelectorAll('a[href]')) {
+        const m = a.getAttribute('href').match(/^\/([A-Za-z0-9._]{1,30})\/?$/);
+        if (m && !NOT_USER.test(m[1]) && a.getBoundingClientRect().top - top < 80) out.push(m[1].toLowerCase());
+      }
+      return out;
+    };
+    // De una cuenta que no seguís: su autor no está en la lista, o "Seguir" o "Sugerencia para ti" arriba. La
+    // publicidad la decide "Sin anuncios" (sección 15): apagado, se ve, aunque sea de una cuenta que no seguís
+    const notFollowed = (post) => {
+      if (!CFG.igBlockAds && isAd(post)) return false;
+      const top = post.getBoundingClientRect().top;
+      const near = (el) => !!el && el.getBoundingClientRect().top - top < 120;
+      if (near(find(post, FOLLOW, 40)) || near(find(post, SUGGESTED, 40))) return true;
+      if (!igFollowed) return false;
+      const who = authors(post, top);
+      return who.length > 0 && !who.some((u) => igFollowed.has(u));
+    };
+    // Lo que va en la lista del feed al lado de las publicaciones (un carrusel, el aviso del final): el ancestro
+    // más grande que no tiene publicaciones adentro. null si no está en la lista
+    const blockOf = (el) => {
+      let b = el;
+      while (b.parentElement && b.parentElement !== document.body && !hasPosts(b.parentElement)) b = b.parentElement;
+      return b.parentElement && hasPosts(b.parentElement) ? b : null;
+    };
+
+    let styled = false;
+    const hide = (el, how, why) => {
+      if (el.hasAttribute('data-lucido-hide')) return;
+      if (!styled) {
+        styled = true;
+        const s = document.createElement('style');
+        s.textContent = '[data-lucido-hide="1px"] { height:1px !important; min-height:0 !important; margin:0 !important; ' +
+          'padding:0 !important; border:0 !important; overflow:hidden !important; visibility:hidden !important; } ' +
+          '[data-lucido-hide="fin"] { display:none !important; }';
+        (document.head || document.documentElement).appendChild(s);
+      }
+      el.setAttribute('data-lucido-hide', how);
+      dev('note', why);
+    };
+
+    let end = null; // "Estás al día": lo que viene después son sugerencias
+    const after = (el) => !!end && !!(end.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const sweep = () => {
+      if (!onHome() || !document.body) return;
+      const posts = feedPosts();
+      if (!posts.length) return;
+      ask();
+      const inPost = (el) => posts.some((p) => p.contains(el));
+      if (end && !end.isConnected) end = null;
+      if (!end) {
+        const e = find(document.body, END, Infinity, inPost);
+        if (e) { end = blockOf(e) || e; dev('note', 'seguidos: llegué a "Estás al día"'); }
+      }
+      for (const post of posts) {
+        if (post.closest('[data-lucido-hide], [data-lucido-ad]')) continue;
+        if (after(post)) hide(post, 'fin', 'seguidos: oculté lo que sigue a "Estás al día"');
+        else if (notFollowed(post)) hide(post, '1px', 'seguidos: oculté una publicación de una cuenta que no seguís');
+      }
+      // Carruseles y títulos de sugerencias, fuera de las publicaciones
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n; (n = walk.nextNode());) {
+        const t = n.data.length <= 40 && n.data.trim();
+        if (!t || !SUGGESTED.test(t) || inPost(n.parentElement) || n.parentElement.closest('[data-lucido-hide]')) continue;
+        const b = blockOf(n.parentElement);
+        if (b && b !== end && !b.contains(end)) hide(b, after(b) ? 'fin' : '1px', 'seguidos: oculté sugerencias');
+      }
+      // Después del final, todo lo de la lista (también lo que no es una publicación)
+      if (end && end.parentElement && hasPosts(end.parentElement)) {
+        for (let x = end.nextElementSibling; x; x = x.nextElementSibling) {
+          if (!x.hasAttribute('data-lucido-hide')) hide(x, 'fin', 'seguidos: oculté lo que sigue a "Estás al día"');
+        }
+      }
+    };
+    // Una publicación nueva se mira apenas aparece, antes de que se dibuje: si se achica después, la pantalla
+    // salta. Lo demás (sugerencias, el final, lo que tarda en llegar), como mucho una vez cada 600 ms
+    let timer = 0;
+    const later = () => { if (!timer && onHome()) timer = setTimeout(() => { timer = 0; sweep(); }, 600); };
+    new MutationObserver((records) => {
+      if (!onHome()) return;
+      for (const r of records) {
+        for (const n of r.addedNodes) {
+          if (n.nodeType !== 1) continue;
+          for (const post of n.tagName === 'ARTICLE' ? [n] : n.getElementsByTagName('article')) {
+            if (post.closest('[data-lucido-hide], [data-lucido-ad]')) continue;
+            if (after(post)) hide(post, 'fin', 'seguidos: oculté lo que sigue a "Estás al día"');
+            else if (notFollowed(post)) hide(post, '1px', 'seguidos: oculté una publicación de una cuenta que no seguís');
+          }
+        }
+      }
+      later();
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+    route(later);
+  }
+
+  // --- 17. Acostar el teléfono mirando un video: pantalla completa (YouTube) ---
+  // Con la rotación del teléfono prendida, la app llama a __lucidoTheater(true) al girar a horizontal en un
+  // video, y (false) al volver a vertical. El reproductor ocupa toda la pantalla con sus controles; no es la
+  // pantalla completa del navegador porque esa solo se puede pedir con un toque. Devuelve false si no hay video.
+  if (YT) {
+    const FULL = `
+      html.lucido-full, html.lucido-full body { overflow:hidden !important; }
+      html.lucido-full #player-container-id { position:fixed !important; inset:0 !important; width:100vw !important;
+        height:100vh !important; max-height:none !important; margin:0 !important; z-index:2147483647 !important;
+        background:#000 !important; transform:none !important; }
+      html.lucido-full #player-container-id #player, html.lucido-full #movie_player, html.lucido-full .html5-video-container {
+        width:100% !important; height:100% !important; max-height:none !important; padding:0 !important; }
+      html.lucido-full #movie_player video { width:100% !important; height:100% !important; left:0 !important;
+        top:0 !important; object-fit:contain !important; }`;
+    let fullStyle = null;
+    window.__lucidoTheater = (on) => {
+      const html = document.documentElement;
+      if (on && !(/^\/watch/.test(location.pathname) && document.querySelector('#player-container-id video'))) return false;
+      if (on && !fullStyle) {
+        fullStyle = document.createElement('style');
+        fullStyle.textContent = FULL;
+        (document.head || html).appendChild(fullStyle);
+      }
+      html.classList.toggle('lucido-full', on);
+      dispatchEvent(new Event('resize')); // que el reproductor se acomode al tamaño nuevo
+      return true;
+    };
+    // Otro video sí, otra página no: si se va del video, sale (la app se entera por la URL)
+    route(() => { if (!/^\/watch/.test(location.pathname)) document.documentElement && document.documentElement.classList.remove('lucido-full'); });
+  }
+
+  // --- 18. El feed de Instagram, filtrado desde los datos ---
+  // Lo más prolijo es que lo que no va ni llegue a dibujarse: se saca de los datos del feed
+  // (xdt_api__v1__feed__timeline__connection) cuando Instagram los lee (JSON.parse, Response.json), como los
+  // anuncios de YouTube (sección 15). Sale lo que es un anuncio y, en "Solo cuentas que seguís", lo de cuentas
+  // que no seguís (según Instagram mismo, friendship_status, o la lista de la sección 16) y las sugerencias. Lo
+  // que no se reconozca queda, y lo atajan las secciones 15 y 16. Si dos páginas seguidas no traen nada de
+  // cuentas que seguís, el feed termina: ya viste todo y lo que sigue son sugerencias. La publicidad sale de
+  // cualquier dato, también la de las historias.
+  // En "Solo cuentas que seguís", además, el inicio le pide a Instagram el feed de su pestaña Seguidos (solo
+  // cuentas que seguís, de lo más nuevo a lo más viejo) en vez del suyo, que casi no trae nada de cuentas que
+  // seguís y por eso tardaba en llenar la pantalla. Se cambia en el pedido (variant y pagination_source, como
+  // los manda Instagram en Seguidos) y la pantalla sigue siendo la del inicio, con su fila de historias. La
+  // primera página puede venir ya con la página, sin pedido que cambiar: entonces la que sigue arranca el feed
+  // de Seguidos desde arriba, sin repetir lo que ya se ve. Si Instagram no lo acepta, vuelve al inicio filtrado
+  // mientras la app siga abierta
+  if (IG && (CFG.igBlockAds || CFG.igFeed === 'following')) {
+    const FEED = 'xdt_api__v1__feed__timeline__connection';
+    const only = CFG.igFeed === 'following';
+    const myId = (document.cookie.match(/(?:^|;\s*)ds_user_id=(\d+)/) || [])[1];
+    const parse = JSON.parse;
+    let empty = 0, seen = false;
+
+    const QUERY = /(?:^|&)fb_api_req_friendly_name=PolarisFeed(?:TimelineRootV2Query|RootPaginationCachedQuery\w*)(?:&|$)/;
+    const BAD = 'lucido-feed-seguidos-no';
+    let bad = false, started = false;
+    try { bad = sessionStorage.getItem(BAD) === '1'; } catch (e) {}
+    const shown = new Set(); // lo que llegó con el feed del inicio, para no repetirlo
+    const idOf = (e) => { const m = e && e.node && e.node.media; return m ? String(m.pk || m.id || '') : ''; };
+    // El pedido del feed del inicio, cambiado al de Seguidos; null si no es ese pedido (o no se cambia)
+    const swap = (body) => {
+      if (!only || bad || typeof body !== 'string' || !QUERY.test(body)) return null;
+      try {
+        const p = new URLSearchParams(body);
+        const v = parse(p.get('variables'));
+        if (!v || typeof v !== 'object' || (v.variant && v.variant !== 'home')) return null;
+        v.variant = 'following';
+        v.data = Object.assign({}, v.data, { pagination_source: 'following' });
+        if (!started && (v.after || v.before)) {
+          v.after = v.before = null;
+          dev('note', 'feed: arranco el de seguidos desde arriba');
+        }
+        started = true;
+        p.set('variables', JSON.stringify(v));
+        dev('note', 'feed: pedí el feed de seguidos');
+        return p.toString();
+      } catch (e) { return null; }
+    };
+    const failed = (why) => {
+      if (bad) return;
+      bad = true;
+      try { sessionStorage.setItem(BAD, '1'); } catch (e) {}
+      dev('note', `feed: Instagram no aceptó el pedido del feed de seguidos (${why}): vuelvo al inicio filtrado`);
+    };
+    if (only) {
+      const xsend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function (body) {
+        const b = swap(body);
+        if (b === null) return xsend.apply(this, arguments);
+        this.addEventListener('load', () => {
+          let text = '';
+          try { text = this.responseType === '' || this.responseType === 'text' ? this.responseText : ''; } catch (e) {}
+          if (this.status !== 200) failed('respondió ' + this.status);
+          else if (text && !/"edges":\s*\[/.test(text)) failed('no mandó publicaciones');
+        });
+        return xsend.call(this, b);
+      };
+      const fetch1 = window.fetch;
+      window.fetch = function (input, init) {
+        const b = init ? swap(init.body) : null;
+        if (b === null) return fetch1.apply(window, arguments);
+        return fetch1.call(window, input, Object.assign({}, init, { body: b })).then((r) => {
+          if (!r.ok) failed('respondió ' + r.status);
+          return r;
+        });
+      };
+    }
+    // 'ad', 'other' (de una cuenta que no seguís, o una sugerencia), 'followed' o '?' (no se sabe: queda)
+    const kind = (n) => {
+      if (!n || typeof n !== 'object') return '?';
+      const m = n.media;
+      if (n.ad || (m && (m.ad_id || m.is_ad || m.ad_action))) return 'ad';
+      if (n.explore_story || n.suggested_users) return 'other';
+      const u = m && (m.user || m.owner);
+      if (!u || !u.username) return '?';
+      if (myId && String(u.pk || u.id) === myId) return 'followed';
+      const fs = u.friendship_status;
+      if (fs && typeof fs.following === 'boolean') return fs.following ? 'followed' : 'other';
+      if (igFollowed) return igFollowed.has(String(u.username).toLowerCase()) ? 'followed' : 'other';
+      return '?';
+    };
+    const prune = (c) => {
+      if (!c || !Array.isArray(c.edges)) return;
+      if (!seen) { seen = true; dev('note', 'feed: leo los datos del feed'); }
+      const following = c.pagination_source === 'following';
+      let ads = 0, others = 0, mine = 0;
+      c.edges = c.edges.filter((e) => {
+        const k = kind(e && e.node);
+        if (k === 'ad' && !CFG.igBlockAds) dev('note', 'anuncios: dejé un anuncio en el feed ("Sin anuncios" apagado)');
+        if (k === 'ad' && CFG.igBlockAds) { ads++; return false; }
+        if (k === 'other' && only) { others++; return false; }
+        if (only && following && shown.has(idOf(e))) return false;
+        if (k === 'followed') mine++;
+        return true;
+      });
+      if (only && !following) for (const e of c.edges) { const id = idOf(e); if (id) shown.add(id); }
+      for (let i = 0; i < ads; i++) dev('note', 'feed: saqué un anuncio de los datos');
+      for (let i = 0; i < others; i++) dev('note', 'feed: saqué una publicación de una cuenta que no seguís de los datos');
+      // Si casi siempre es 0, tarda en llenar la pantalla. "seguidos" es el feed de Seguidos; "inicio", el normal
+      if (only) dev('note', `feed: página (${following ? 'seguidos' : c.pagination_source || 'inicio'}) con ${mine} de cuentas que seguís`);
+      if (!only || !c.page_info) return;
+      if (mine) empty = 0;
+      else if (others && ++empty >= 2 && c.page_info.has_next_page) {
+        c.page_info.has_next_page = false;
+        dev('note', 'feed: terminé el feed (dos páginas sin cuentas que seguís)');
+      }
+    };
+    const find = (o, depth) => {
+      if (!o || typeof o !== 'object' || depth > 40) return;
+      if (o[FEED]) prune(o[FEED]);
+      for (const k in o) if (o[k] && typeof o[k] === 'object') find(o[k], depth + 1);
+    };
+    // Publicidad en cualquier dato (las historias patrocinadas, también): lo que tiene un ad_id, y las "historias
+    // inyectadas" (injected_story_units), que es como Instagram mete las publicidades entre historias
+    const AD_DATA = /"ad_id":\s*"?\d|injected_story_units/;
+    const isAdItem = (e) => !!e && typeof e === 'object' &&
+      (!!e.ad_id || e.is_ad === true || !!(e.node && (e.node.ad || (e.node.media && e.node.media.ad_id))));
+    const stripAds = (o, depth) => {
+      if (!o || typeof o !== 'object' || depth > 40) return 0;
+      let n = 0;
+      if (Array.isArray(o)) {
+        for (let i = o.length - 1; i >= 0; i--) if (isAdItem(o[i])) { o.splice(i, 1); n++; }
+      }
+      for (const k in o) {
+        const v = o[k];
+        if (!v || typeof v !== 'object') continue;
+        if (/injected_story_units/.test(k)) {
+          for (const kk in v) if (Array.isArray(v[kk]) && v[kk].length) { n += v[kk].length; v[kk].length = 0; }
+        } else n += stripAds(v, depth + 1);
+      }
+      return n;
+    };
+    JSON.parse = function (text) {
+      const o = parse.apply(this, arguments);
+      if (typeof text !== 'string') return o;
+      try {
+        if (text.indexOf(FEED) !== -1) find(o, 0);
+        if (CFG.igBlockAds && AD_DATA.test(text)) {
+          const n = stripAds(o, 0);
+          for (let i = 0; i < n; i++) dev('note', 'anuncios: saqué publicidad de los datos (historias o feed)');
+        }
+      } catch (e) {}
+      return o;
+    };
+    Response.prototype.json = function () { return this.text().then((t) => JSON.parse(t)); };
+  }
 })();

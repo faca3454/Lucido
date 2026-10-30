@@ -85,18 +85,30 @@ class AppGuard : AccessibilityService() {
         )
     }
 
-    /** El evento se dispara varias veces seguidas: actuar una sola vez. */
+    /**
+     * El evento se dispara varias veces seguidas: actuar una sola vez. Si en ese rato se vuelve a abrir (tocar
+     * el ícono otra vez enseguida), se mira de nuevo al terminar: si no, el navegador quedaba abierto, porque
+     * no llega otro evento hasta que se cambia de app.
+     */
     private fun debounce(): Boolean {
         val now = SystemClock.elapsedRealtime()
-        if (now - lastJump < 1500) return false
+        if (now - lastJump < 1500) {
+            handler.removeCallbacks(recheck)
+            handler.postDelayed(recheck, lastJump + 1600 - now)
+            return false
+        }
         lastJump = now
         return true
     }
 
+    /** La app que se ve ahora (la ventana activa; el teclado no cuenta), o la del último evento. */
+    private fun front() = rootInActiveWindow?.packageName?.toString() ?: foreground
+
+    private val recheck = Runnable { front()?.let(::enforce) }
+
     // Cuando empieza la noche o se llega al límite, sacar al usuario de lo que tenga abierto
     // (navegador o app oficial con la pausa), sin esperar a que cambie de pantalla
     private val handler = Handler(Looper.getMainLooper())
-    private var wasLocked = false
     private fun locked() = Lock.any(this) || Sleep.blocksBrowsers(this)
     // Apps oficiales dentro del límite: al terminarse el tiempo (o empezar la noche o el foco) se sale
     // de la oficial, aunque ya hubiera otro bloqueo antes (ej: un foco que no bloquea YouTube)
@@ -107,21 +119,22 @@ class AppGuard : AccessibilityService() {
             countOfficial()
             Widgets.update(this@AppGuard)
             Protection.applyIconVisibility(this@AppGuard) // esconder/mostrar el ícono al cambiar la noche o el compromiso
-            val locked = locked()
-            if (locked && !wasLocked) foreground?.let(::enforce)
-            wasLocked = locked
+            // Bloqueado: se mira qué app se ve (al empezar la noche o el límite, y por las dudas de que se haya
+            // escapado un evento)
+            if (locked()) front()?.let(::enforce)
             val official = foreground?.takeIf { it in redirects }
             val allowed = official != null && Official.allowed(this@AppGuard, official)
             if (official != null && officialWasAllowed && !allowed) enforce(official)
             officialWasAllowed = allowed
             handler.removeCallbacks(this)
-            handler.postDelayed(this, (Lock.msUntilChange(this@AppGuard) + 500).coerceIn(1_000, 60_000))
+            // De noche, con los navegadores bloqueados, cada 10 s: si uno se escapó, no queda abierto más que eso
+            val most = if (Sleep.blocksBrowsers(this@AppGuard)) 10_000L else 60_000L
+            handler.postDelayed(this, (Lock.msUntilChange(this@AppGuard) + 500).coerceIn(1_000, most))
         }
     }
 
     override fun onServiceConnected() {
         Protection.updateGuardNotice(this, guardOn = true)
-        wasLocked = locked()
         lockTicker.run()
     }
 

@@ -180,7 +180,9 @@ object Widgets {
         return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).also { view.draw(Canvas(it)) }
     }
 
-    private fun home(c: Context) = open(c, Intent(c, HomeActivity::class.java), 10)
+    /** El inicio de Lúcido o, con el ícono escondido (que apaga el inicio), las estadísticas. */
+    private fun home(c: Context) = open(c,
+        if (Protection.iconHidden(c)) PanelActivity.intent(c, PanelActivity.STATS) else Intent(c, HomeActivity::class.java), 10)
 
     private fun alias(c: Context, name: String) =
         Intent(Intent.ACTION_MAIN).setComponent(ComponentName(c, "$PKG.$name"))

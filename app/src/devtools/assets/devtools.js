@@ -1,6 +1,7 @@
 // Herramientas de los APK de prueba. No va en la versión publicada (ver app/build.gradle.kts).
 // La app lo pone antes de block.user.js en cada página:
-// - Mediciones: tareas largas, cuánto tarda cada cambio de página en dibujarse y cada video en arrancar.
+// - Mediciones: tareas largas, cuánto tarda cada cambio de página en dibujarse y cada video en arrancar, y
+//   cuánto video bajó.
 //   La medición automática de Ajustes (DevTools.kt) agrega este resumen (summary) a su informe, y mide
 //   cada paso con start() y result().
 // - Si deslizar para responder no encuentra "Responder", copia la estructura del mensaje (sin el texto).
@@ -64,6 +65,74 @@
   const push = history.pushState;
   history.pushState = function (...a) { const r = push.apply(this, a); auto(); return r; };
   addEventListener('popstate', auto);
+
+  // Video que bajó la página: pedidos que salieron de verdad (block.user.js va después y retiene los suyos
+  // antes de llegar acá) y cuánto pesaban. Más lo que "Videos solo al tocar" dejó esperando, mandó o descartó,
+  // y lo que hizo el script por su cuenta (notes). Se guarda en la pestaña (sessionStorage): sigue contando
+  // aunque la página se recargue, hasta "Poner en cero" (Ajustes → Pruebas → Datos bajados)
+  const KEY = 'lucido-dev';
+  let saved = {};
+  try { saved = JSON.parse(sessionStorage.getItem(KEY)) || {}; } catch (e) {}
+  const data = Object.assign({ n: 0, bytes: 0, held: 0, sent: 0, dropped: 0 }, saved.data);
+  const notes = Object.assign({}, saved.notes);
+  const bytes = Object.assign({ img: 0, video: 0, js: 0, otros: 0 }, saved.bytes); // todo lo que bajó, por tipo
+  let saving = 0;
+  const store = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ data, notes, bytes })); } catch (e) {} };
+  const save = () => { clearTimeout(saving); saving = setTimeout(store, 300); };
+  addEventListener('pagehide', store);
+  const isVideo = (url) => {
+    try {
+      const u = new URL(url, location.href);
+      return (/(^|\.)(cdninstagram\.com|fbcdn\.net)$/.test(u.hostname) && /\.(mp4|m4v|m4a|webm)$/i.test(u.pathname)) ||
+        /(^|\.)googlevideo\.com$/.test(u.hostname);
+    } catch (e) {
+      return false;
+    }
+  };
+  const weigh = (h) => { const n = parseInt(h, 10); if (n > 0) { data.bytes += n; save(); } };
+  // Todo lo que bajó la página, por tipo: Instagram y YouTube dejan ver el tamaño (Timing-Allow-Origin). No
+  // cuenta lo que pide un <video> por su cuenta (sin fetch), ni lo que vino de la caché
+  const kind = (e) => isVideo(e.name) ? 'video'
+    : e.initiatorType === 'img' || /\.(jpe?g|png|webp|gif|heic|avif)(\?|$)/i.test(e.name) ? 'img'
+      : e.initiatorType === 'script' || /\.js(\?|$)/i.test(e.name) ? 'js' : 'otros';
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) if (e.transferSize > 0) bytes[kind(e)] += e.transferSize;
+      save();
+    }).observe({ type: 'resource', buffered: true });
+  } catch (e) {}
+  const fetch0 = window.fetch;
+  window.fetch = function (input) {
+    const p = fetch0.apply(window, arguments);
+    if (isVideo(input instanceof Request ? input.url : String(input))) {
+      data.n++;
+      save();
+      p.then((r) => weigh(r.headers.get('content-length')), () => {});
+    }
+    return p;
+  };
+  const xvideo = new WeakSet(), xopen = XMLHttpRequest.prototype.open, xsend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    if (isVideo(String(url))) xvideo.add(this); else xvideo.delete(this);
+    return xopen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function () {
+    if (xvideo.has(this)) {
+      data.n++;
+      save();
+      this.addEventListener('loadend', () => weigh(this.getResponseHeader('content-length')), { once: true });
+    }
+    return xsend.apply(this, arguments);
+  };
+
+  // Errores de los scripts de Lúcido (los de Instagram y YouTube vienen de sus archivos y no se cuentan)
+  addEventListener('error', (e) => {
+    if (e.filename && /cdninstagram|fbcdn|instagram\.com\/|youtube\.com\/|ytimg|gstatic/.test(e.filename)) return;
+    if (/^Script error\.?$/.test(e.message)) return; // de un script de otro sitio: el navegador no dice cuál
+    const w = 'error: ' + String(e.message).slice(0, 120);
+    notes[w] = (notes[w] || 0) + 1;
+    save();
+  });
 
   let benching = false; // midiendo en esta página: los videos, en silencio
   let wantVideo = null; // paso "abrir un video": desde cuándo y desde qué página (no cuentan las vistas previas de ahí)
@@ -150,9 +219,20 @@
     if (lastTap && lastTap.event === e) { lastTap.reached = true; lastTap.prevented = e.defaultPrevented; }
   });
 
+  // Lo que hizo el script por su cuenta, con cuántas veces (solo lo que no tiene datos de nadie)
+  const script = () => {
+    const all = Object.entries(notes);
+    return all.length ? ['Lo que hizo el script (veces):', ...all.slice(-25).map(([w, n]) => `  ${w}: ${n}`)] : [];
+  };
+  const mb = (n) => (n / 1048576).toFixed(1);
+  const videoLine = () => `Video bajado: ${data.n} pedidos, ${mb(data.bytes)} MB` +
+    (data.held ? ` · solo al tocar: ${data.held} en espera, ${data.sent} mandados después, ${data.dropped} descartados` : '');
+  const bytesLine = () => `Bajó ${mb(bytes.img + bytes.video + bytes.js + bytes.otros)} MB: imágenes ${mb(bytes.img)}, ` +
+    `video ${mb(bytes.video)}, código ${mb(bytes.js)}, otros ${mb(bytes.otros)}`;
+
   // Resumen de lo medido en esta página (para el informe de la medición automática); null si no hay nada
   const summary = () => {
-    if (!navs.length && !videos.length && !tasks.length) return null;
+    if (!navs.length && !videos.length && !tasks.length && !data.n && !data.held && !Object.keys(notes).length) return null;
     const long = {}; // pantalla → [cantidad, ms en total, ms la más larga]
     for (const [start, ms] of tasks) {
       const k = visits.filter(([t]) => t <= start).pop()[1], t = long[k] || (long[k] = [0, 0, 0]);
@@ -168,6 +248,8 @@
       '  ' + navs.slice(-30).join(' · '),
       `Videos, de play() a playing (ms): ${sorted.length ? `mediana ${sorted[sorted.length >> 1]}, máx ${sorted[sorted.length - 1]} (n=${sorted.length})` : 'ninguno'}`,
       '  ' + videos.slice(-30).join(' '),
+      videoLine(),
+      ...script(),
       ...taps.map((t) => `Toque en foto/video de un chat: ${t.media} · llegó a la página: ${t.reached ? (t.prevented ? 'sí (y alguien lo usó)' : 'sí') : 'no'}` +
         `\n  después: ${t.after || 'sin medir'}\n  otra igual: ${t.twins}\n  cadena: ${t.chain}\n  ${t.card}`),
     ].join('\n');
@@ -206,9 +288,14 @@
   window.__lucidoDev = {
     // Avisos de block.user.js
     on(what, x) {
-      if (what === 'note') trace.push([performance.now(), x]);
+      if (what === 'note') {
+        trace.push([performance.now(), x]);
+        notes[x] = (notes[x] || 0) + 1;
+        save();
+      }
       else if (what === 'ready') { if (ready === null) ready = performance.now(); }
       else if (what === 'swipe') swipeFailed(x);
+      else if (what === 'video') { data[x]++; save(); }
     },
     // Medición automática: empieza a medir lo que hace el paso que sigue (con video, hasta que arranca).
     // Devuelve el id de la página, para saber después si se recargó.
@@ -237,5 +324,26 @@
     },
     id,
     summary,
+    // Para "Datos bajados": video y lo que hizo el script desde que se puso en cero (null si nada)
+    report() {
+      if (!data.n && !data.held && !Object.keys(notes).length && !(bytes.img + bytes.video + bytes.js + bytes.otros)) return null;
+      const name = /instagram/.test(location.hostname) ? 'Instagram' : /youtube/.test(location.hostname) ? 'YouTube' : location.hostname;
+      // Cómo arma Instagram el feed: las secciones 15 y 16 buscan publicaciones (<article> o "Me gusta")
+      const like = 'svg[aria-label="Me gusta"], svg[aria-label="Like"], svg[aria-label="Ya no me gusta"], svg[aria-label="Unlike"]';
+      const shape = /instagram/.test(location.hostname) && location.pathname === '/'
+        ? [`Inicio: ${document.getElementsByTagName('article').length} <article>, ${document.querySelectorAll(like).length} "Me gusta"`] : [];
+      // Lo que recibió esta página de los interruptores de Anuncios (y el feed), para ver si llegó el cambio
+      const cfg = window.__noscrollCfg || {};
+      const flag = (on) => (on === false ? 'apagado' : 'prendido');
+      const ads = name === 'Instagram' ? [`Sin anuncios: ${flag(cfg.igBlockAds)} · feed: ${cfg.igFeed || 'normal'}`]
+        : name === 'YouTube' ? [`Sin anuncios: ${flag(cfg.ytBlockAds)}`] : [];
+      return [name, ...ads, bytesLine(), videoLine(), ...shape, ...script()].join('\n');
+    },
+    reset() {
+      for (const k of Object.keys(data)) data[k] = 0;
+      for (const k of Object.keys(bytes)) bytes[k] = 0;
+      for (const k of Object.keys(notes)) delete notes[k];
+      try { sessionStorage.removeItem(KEY); } catch (e) {}
+    },
   };
 })();

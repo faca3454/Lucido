@@ -211,6 +211,166 @@ La app va a ser pública, así que no usamos el modo "propietario del dispositiv
 
 ---
 
+## 7. Pedidos de octubre de 2026
+
+Estado: **acordado**. La tanda A va solo en `block.user.js` (les llega a todos sin reinstalar); la
+tanda B necesita un APK nuevo (1.3.0). Ningún cambio renombra ajustes guardados: los ajustes nuevos
+arrancan con su valor por defecto y el compromiso en curso no se toca.
+
+### 7.1 Anuncios (tanda A; el interruptor, tanda B)
+- No se puede usar un bloqueador hecho: la WebView no lleva extensiones, y los bloqueadores por DNS o
+  de todo el teléfono no ven estos anuncios (vienen de los mismos servidores que los videos y las
+  publicaciones). Se escribe en el script con la receta de uBlock Origin, sin copiar su código (GPL).
+- YouTube: ocultar las tarjetas patrocinadas; borrar `adPlacements`, `playerAds` y `adSlots` de los
+  datos del video antes de que YouTube los lea; si igual aparece un anuncio, silenciarlo y saltarlo.
+- Instagram: ocultar las publicaciones con "Publicidad" / "Sponsored" y saltar las historias
+  patrocinadas.
+- Prendido por defecto (`igBlockAds`, `ytBlockAds`); el interruptor llega con la 1.3.0. ✅ Hecho: sección
+  "Anuncios" en *Instagram y YouTube* (`ig_block_ads`, `yt_block_ads`), que `Rules.build` le pasa al script.
+- Si YouTube cambia la forma de meter anuncios: mirar qué cambió uBlock Origin y copiar la idea.
+
+### 7.2 Historias en "Solo seguidos" (tanda A)
+- Instagram no muestra la fila de historias en `/?variant=following`. Primero se dibujó una propia
+  arriba de ese feed (con los datos de la de Instagram), pero sus historias no tenían la fila de
+  Instagram detrás: al terminar cada persona salía al inicio y había cortes y recargas. No se puede
+  abrir Instagram dentro de un marco (`X-Frame-Options: DENY`).
+- **Decidido después de la cuarta prueba (@version 20):** "Solo seguidos" pasa a ser el inicio normal
+  de Instagram (su fila y su visor de historias, tal cual) sin lo que no es de cuentas que seguís: las
+  publicaciones con "Seguir" o "Sugerencias para ti" arriba y los carruseles de sugerencias se achican a
+  1 px; desde "Estás al día" todo lo que sigue desaparece (`display:none`, para que Instagram deje de
+  cargar sugerencias) y ahí termina. El orden es el de Instagram, no estrictamente cronológico. El
+  ajuste guardado sigue siendo `ig_feed = following`.
+- "Bloqueado" sigue igual: el inicio vuelve al inbox.
+
+### 7.3 Videos solo al tocar que no gasten datos (tanda A)
+- Antes solo frenaba la reproducción: Instagram igual bajaba los videos con su propio reproductor.
+- `preload="none"` y sin autoplay desde que se crea el video, y los pedidos de video quedan en
+  espera hasta que tocás uno (o abrís un reel o una historia).
+- Para comparar antes y después, los APK de prueba miden los datos que baja la app.
+
+### 7.4 Estadísticas con el ícono escondido (tanda B)
+- Con "Esconder el ícono" el inicio se apaga y no había otro camino a las estadísticas (los widgets
+  tampoco abrían). Caminos nuevos: atajo "Estadísticas" al mantener presionado IG Lite / YT Lite,
+  los widgets abren las estadísticas si el ícono está escondido, una fila en Ajustes y la comparación
+  con antes en la pantalla del compromiso.
+- ✅ Hecho (1.3.0): atajo *Estadísticas* (antes de *Ajustes*) en los tres íconos; los widgets abren las
+  estadísticas mientras el inicio está apagado (y se rearman al esconder o mostrar el ícono); fila
+  *Estadísticas* arriba de todo en Ajustes; y en el compromiso activo, una fila con cómo vas ("42% menos
+  que antes de Lúcido", o el promedio, o lo de hoy) que lleva a las estadísticas.
+
+**Primera prueba en el teléfono (@version 16):** YouTube sin anuncios ✅. Instagram: ocultar la
+publicación con `display:none` cortaba la carga del resto del feed, y las historias patrocinadas no se
+salteaban (probablemente la etiqueta quedaba después de los primeros 400 textos de la página). Ahorro de datos: 8 MB
+en 5 s. Arreglos en @version 17: la publicación se achica a 1 px sin salir de la página (y nunca un
+`<article>` con otros adentro o más alto que dos pantallas); la etiqueta de las historias se busca en
+toda la página, a la vista y arriba, y se avanza con "Siguiente", la flecha o un toque (también
+táctil); los videos de los carruseles ya no cuentan como "visor" (podían abrir todos los pedidos); al tocar
+salen 2 pedidos y no 4, y mientras ves uno el comienzo de los otros (`bytestart=0`) sigue esperando.
+El informe de "Medir" suma lo que hizo el script en cada página.
+
+**Segunda prueba (@version 17), con video:** el ahorro de datos retiene casi todo (685 pedidos en espera,
+466 descartados; lo que salió sería de las historias, que se ven a propósito). En "Solo seguidos" el feed
+saltaba: la fila de historias se volvía a poner antes de la "primera" publicación, y al bajar Instagram
+saca las de arriba (quedaba en el medio). Al abrir una historia (foto) la pantalla giraba a horizontal: la
+regla nueva de pantalla completa era para YouTube. Al salir de una historia, la página se recargaba
+entera: lo más probable, Instagram volvía al inicio dentro del sitio y el script lo mandaba a
+"Seguidos" recargando.
+Arreglos en @version 18: la fila va arriba de la lista y no se mueve; volver al inicio pasa a "Seguidos"
+dentro del sitio; al terminar las historias de alguien abiertas desde la fila siguen las de la próxima
+persona sin ver (no si las cerraste con la X, deslizando para abajo o con atrás); la rotación de la
+pantalla completa, solo en YouTube. "Datos bajados" (APK de prueba) reemplaza a "Medir" para estas
+pruebas: MB de la app y, por página, cuánto bajó por tipo (imágenes, video, código), los pedidos de video
+y lo que hizo el script, aunque la página se recargue.
+
+**Tercera prueba (@version 18):** sin anuncios en YouTube e Instagram ✅, pantalla completa de YouTube ✅,
+ahorro de datos ✅ (Instagram 11 MB en un par de minutos: 8,5 de imágenes y 0 de video, con 113 pedidos
+de video en espera). Pero al volver de unas historias quedaba el feed normal ("Instagram", con
+sugerencias) con la URL de seguidos, y con dos filas de historias: Instagram cambiaba la URL sin cambiar
+de feed. Arreglos en @version 19: si Instagram va a "/" en "Solo seguidos", va directo con
+`?variant=following` (así arma ese feed); si a los 1,5 s se ve un feed sin el título "Seguidos", recarga en
+seguidos (una vez cada 30 s como mucho, y nunca sin publicaciones a la vista, como en el login); la fila
+propia solo se dibuja con el feed de seguidos a la vista.
+
+**Cuarta prueba (@version 19):** pasa a la persona que sigue, pero entre una y otra se ve un instante el
+inicio normal, y al final recarga: no es la experiencia del feed normal. Se cambia el enfoque (ver 7.2).
+
+**Quinta prueba (@version 20):** las historias andan como en el feed normal ✅. Pero se ven cuentas que no
+seguís: Instagram mezcla recomendaciones sin marcarlas (millo_ush, sin "Seguir" ni "Sugerencia"), la
+marca que sí pone es "Sugerencia para ti" (en singular) y tampoco se ocultó un anuncio, así que en el
+inicio las publicaciones probablemente no son `<article>`. Arreglos en @version 21: se compara el autor
+de cada publicación con la lista de cuentas que seguís (`/api/v1/friendships/<id>/following/`, guardada
+en el teléfono un día; tus publicaciones también van), las publicaciones se buscan como `<article>` o,
+si no hay, como el contenedor más grande con un solo "Me gusta" (también para los anuncios), y "Sugerencia
+para ti" en singular. "Datos bajados" dice cuántos `<article>` y "Me gusta" hay en el inicio y los errores
+del script.
+
+**Sexta prueba (@version 21):** el inicio sí usa `<article>` (8) y los anuncios se ocultan (21), pero la
+lista de cuentas que seguís nunca llegó (sin nota: el pedido se cortaba sin avisar), así que solo se
+ocultaban las marcadas (51), y con tantas publicaciones achicándose la pantalla saltaba. Arreglos en
+@version 22: el feed se filtra desde los datos (sección 18: `xdt_api__v1__feed__timeline__connection`, al
+leerlos con `JSON.parse` o `Response.json`), así lo que no va ni se dibuja: anuncios y, en "Solo cuentas que
+seguís", lo de cuentas que no seguís (según `friendship_status` o la lista) y las sugerencias; dos páginas
+seguidas sin cuentas que seguís terminan el feed. Lo que se oculta en la página se mira apenas aparece,
+antes de dibujarse. La lista busca tu cuenta en la cookie `ds_user_id` o en `current_user`, y cada falla
+queda anotada en "Datos bajados".
+
+**Séptima prueba (@version 22):** se ve bien pero el inicio tarda mucho en llenarse (una sola publicación y
+la rueda ~15 s: lo más probable, cada página trae pocas de cuentas que seguís); las historias tienen
+publicidad; un video quedó con "Tenemos problemas para reproducir este video" (lo más probable, por los
+pedidos de video descartados). Arreglos en @version 23: los pedidos de video ya no se descartan; se sabe
+de qué video es cada uno (el MediaSource de cada `<video>`, y después por la dirección), al tocar uno salen
+los suyos y, si a los 3 s no arrancó, todos los que esperaban. La publicidad sale de cualquier dato (lo que
+tiene `ad_id`, y `injected_story_units`, que es como Instagram mete las de las historias). "Datos bajados"
+anota cuántas de cuentas que seguís trae cada página y encuentra las páginas aunque hayas cerrado IG Lite
+desde Recientes (siguen vivas 30 minutos).
+
+**Octava prueba (@version 23):** sin publicidad en las historias ✅. El feed sigue tardando: el informe dice
+que cada página del inicio trae 0 o 1 publicación de cuentas que seguís (el resto son recomendaciones), así
+que al recargar se ve una sola y las demás tardan. Arreglo en @version 24: el inicio le pide a Instagram el
+feed de su pestaña Seguidos (solo cuentas que seguís, del más nuevo al más viejo). En el código de Instagram
+web, la consulta del feed (`PolarisFeedTimelineRootV2Query` y su paginación
+`PolarisFeedRootPaginationCachedQuery_subscribe`) lleva `variant` (`home`, `following`, `favorites`,
+`past_posts`) y Seguidos usa `pagination_source: "following"`; el script los cambia en el pedido y la
+pantalla sigue siendo la del inicio, con su fila de historias. Si la primera página viene con la página
+(sin pedido), la siguiente arranca Seguidos desde arriba sin repetir lo que ya se ve. Si Instagram no
+acepta el pedido (error o sin publicaciones), vuelve al inicio filtrado mientras la app siga abierta. El
+filtro de los datos y el de la pantalla quedan de respaldo. "Datos bajados" anota "pedí el feed de seguidos"
+y de qué feed es cada página ("seguidos" o "inicio").
+
+**Novena prueba (@version 24):** ✅ carga rapidísimo, sin publicidad y sin bajar video (282 pedidos de video
+esperando, 0 MB). El informe confirma el camino: la primera página vino con la página (del inicio, 1 de
+cuentas que seguís) y las 14 siguientes fueron del feed de Seguidos, con 2 a 8 publicaciones cada una.
+
+**Décima prueba (APK 1.3.0 de prueba, @version 24):** los widgets abren las estadísticas ✅. Los interruptores
+de "Sin anuncios" no hacían nada: apagados, los anuncios no volvían (en las dos apps). En Instagram, con "Solo
+cuentas que seguís", la publicidad se ocultaba igual como "de una cuenta que no seguís". Arreglo en @version
+26: ahí la publicidad la decide solo "Sin anuncios" (la detección de publicidad pasa a ser compartida por las
+secciones 15 y 16). En YouTube el camino (panel → `Rules.build` → recarga → script) está bien en el código y en
+las pruebas; para saber si YouTube no manda anuncios o si el cambio no llega, "Datos bajados" muestra qué valor
+de "Sin anuncios" recibió cada página y anota "YouTube mandó anuncios para un video y quedan". Posible causa
+en la app: `shouldOverrideUrlLoading` trataba la navegación de un marco (iframe) de otro sitio como un link
+(lo cortaba y lo abría afuera), y los anuncios de YouTube vienen en marcos de Google (`imasdk.googleapis.com`,
+fuera de `inAppHosts`). Con "Sin anuncios" prendido no se notaba. Ahora los marcos se cargan en su lugar y
+afuera van solo los links que cambian la página entera.
+
+**Navegadores de noche:** un compañero abrió Brave y Chrome con un compromiso y de noche. Hueco encontrado
+(sin poder probarlo en un teléfono): al abrir un navegador, la Accesibilidad manda al inicio y descarta los
+eventos de los 1,5 s siguientes; si se lo vuelve a abrir en ese rato, queda abierto, porque no llega otro evento
+hasta cambiar de app. Arreglo: al terminar ese rato se mira de nuevo la app que se ve (la ventana activa), y
+mientras dura el bloqueo se revisa cada 10 s de noche (60 s el resto) qué app se ve.
+
+### 7.5 Pantalla completa de YouTube como en la app oficial (adelantada a la tanda A)
+- Video horizontal en pantalla completa: queda acostado aunque el teléfono esté vertical (gira solo
+  entre los dos lados acostados). Video vertical: vertical.
+- Con la rotación del teléfono prendida, acostarlo mirando un video entra solo a pantalla completa y
+  enderezarlo sale. Con la rotación apagada, solo con el botón.
+- Hecho: la del botón queda en `sensorLandscape` (o vertical si el video lo es). La de acostar el
+  teléfono no es la del navegador (esa solo se puede pedir con un toque): el script estira el
+  reproductor a toda la pantalla (`__lucidoTheater`) y la app esconde las barras; sale al enderezarlo,
+  con atrás o al irse del video.
+
+---
+
 ## Orden de trabajo
 
 1. **Reels sin scroll** (punto 1). Solo el script.

@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Al mantener presionado Lúcido, IG Lite o YT Lite. Con el ícono de Lúcido escondido son el
+     camino a las estadísticas y a los ajustes -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="stats"
+        android:enabled="true"
+        android:icon="@drawable/ic_stats"
+        android:shortcutShortLabel="@string/stats_title">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.brainrotless.app"
+            android:targetClass="com.brainrotless.app.PanelActivity">
+            <extra android:name="panel" android:value="stats" />
+        </intent>
+    </shortcut>
     <shortcut
         android:shortcutId="settings"
         android:enabled="true"

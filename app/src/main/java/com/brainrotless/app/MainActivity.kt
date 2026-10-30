@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.MutableContextWrapper
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
@@ -21,6 +22,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.text.format.DateFormat
 import android.view.Gravity
 import android.view.PixelCopy
@@ -139,6 +141,8 @@ class MainActivity : ComponentActivity() {
     // --- Pantalla completa de video ---
     private var fullscreenView: View? = null
     private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
+    private var theater = false // la de acostar el teléfono mirando un video de YouTube (ver enterTheater)
+    private var orientation = Configuration.ORIENTATION_UNDEFINED
 
     override fun attachBaseContext(base: Context) = super.attachBaseContext(Lang.wrap(base))
 
@@ -190,7 +194,7 @@ class MainActivity : ComponentActivity() {
         refresh = SwipeRefreshLayout(this).apply {
             addView(webs, ViewGroup.LayoutParams(MATCH, MATCH))
             // La página avisa (vía JS) si el gesto empezó arriba de todo
-            setOnChildScrollUpCallback { _, _ -> fullscreenView != null || !Bridge.atTop }
+            setOnChildScrollUpCallback { _, _ -> fullscreenView != null || theater || !Bridge.atTop }
             setColorSchemeColors(Brand.color(context, R.color.brand_primary))
             setProgressBackgroundColorSchemeColor(Brand.color(context, R.color.brand_surface))
             setOnRefreshListener { reloadSmooth(web) }
@@ -222,6 +226,7 @@ class MainActivity : ComponentActivity() {
             addView(guardScreen, FrameLayout.LayoutParams(MATCH, MATCH))
         }
         setContentView(root)
+        orientation = resources.configuration.orientation
         // Cada vez que aparece o se va un aviso, o se cambia de plataforma, hay un layout: repintar las barras
         root.viewTreeObserver.addOnGlobalLayoutListener {
             paintBars()
@@ -242,6 +247,7 @@ class MainActivity : ComponentActivity() {
                 val origin = backToYouTube
                 when {
                     fullscreenView != null -> exitFullscreen()
+                    theater -> exitTheater()
                     !blocked && web.canGoBack() -> web.goBack()
                     origin != null && guardScreen.visibility != View.VISIBLE -> { backToYouTube = null; goTo(origin) }
                     // En la primera página la app pasa al fondo, como cualquier app: al volver sigue donde
@@ -297,6 +303,8 @@ class MainActivity : ComponentActivity() {
         Lang.applyTo(this)
     }
 
+    private fun livePages(): List<WebView> = if (::igWeb.isInitialized) listOfNotNull(igWeb, ytWebOrNull) else emptyList()
+
     /** Una página guardada pasa a esta pantalla. */
     private fun attach(v: WebView) {
         (v.context as? MutableContextWrapper)?.baseContext = this
@@ -309,6 +317,9 @@ class MainActivity : ComponentActivity() {
         override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
             val u = r.url
             val url = u.toString()
+            // Un marco dentro de la página (un anuncio, un video insertado, un captcha) se carga ahí: afuera van
+            // solo los links que cambian la página entera. Si no, el marco se cortaba y se abría como un link
+            if (!r.isForMainFrame) return u.scheme != "https" && u.scheme != "http"
             if (isYouTube(url) && Lock.yt(this@MainActivity) != null) {
                 if (v === igWeb) backToYouTube = false
                 switchTo(ytWeb); showLockScreen(); return true
@@ -337,6 +348,7 @@ class MainActivity : ComponentActivity() {
         // También al navegar dentro del sitio (pushState): si ahora hay a dónde volver, el atrás es propio
         override fun doUpdateVisitedHistory(v: WebView, url: String?, isReload: Boolean) {
             if (v === web) updateBack()
+            if (v === ytWebOrNull && url?.contains("/watch") != true) exitTheater() // el script ya lo achicó
         }
 
         override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) {
@@ -367,6 +379,7 @@ class MainActivity : ComponentActivity() {
         override fun onRenderProcessGone(v: WebView, detail: RenderProcessGoneDetail): Boolean {
             val url = v.url?.takeIf { it != "about:blank" }
             if (v === web && fullscreenView != null) exitFullscreen()
+            if (v === ytWebOrNull) exitTheater()
             if (v === web) { keepScreenOn(false); hideStill() }
             val fresh = buildWebView().apply { visibility = v.visibility }
             webs.addView(fresh, webs.indexOfChild(v), FrameLayout.LayoutParams(MATCH, MATCH))
@@ -449,7 +462,14 @@ class MainActivity : ComponentActivity() {
             root.addView(view, FrameLayout.LayoutParams(MATCH, MATCH))
             content.visibility = View.GONE
             setBarsHidden(true)
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            // YouTube, como su app: un video horizontal queda acostado aunque el teléfono esté vertical (gira
+            // solo entre los dos lados acostados) y uno vertical, vertical. Instagram (las historias se abren en
+            // pantalla completa) gira como el resto de la app
+            if (onYouTube) web.evaluateJavascript(VIDEO_SHAPE) { shape ->
+                if (fullscreenView !== view) return@evaluateJavascript
+                requestedOrientation = if (shape == "\"v\"") ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
         }
 
         override fun onHideCustomView() = exitFullscreen()
@@ -463,6 +483,7 @@ class MainActivity : ComponentActivity() {
     /** Muestra la WebView de esa plataforma con un fundido corto; la otra queda viva, en pausa. */
     private fun switchTo(v: WebView) {
         if (v === web && v.visibility == View.VISIBLE) return
+        exitTheater()
         if (usageMark > 0) countUsage() // lo de hasta ahora, a la app que se estaba viendo
         val old = web
         web = v
@@ -627,6 +648,7 @@ class MainActivity : ComponentActivity() {
         countUsage()
         lockScreen.visibility = View.VISIBLE
         if (fullscreenView != null) exitFullscreen()
+        exitTheater()
         ytWebOrNull?.loadUrl("about:blank") // corta el video y el audio
     }
 
@@ -649,7 +671,7 @@ class MainActivity : ComponentActivity() {
             else -> null
         }
         // Con el teclado abierto se esconde: el chat necesita el lugar (y ya se ve que es solo mensajes)
-        lockBar.visibility = if (text != null && !keyboard) View.VISIBLE else View.GONE
+        lockBar.visibility = if (text != null && !keyboard && !theater) View.VISIBLE else View.GONE
         lockBarText.text = text
         // TalkBack sin el nombre del emoji del principio ("cronómetro, Llegaste…")
         lockBarText.contentDescription = text?.replace(Regex("^[^\\p{L}\\p{N}]+"), "")
@@ -796,6 +818,8 @@ class MainActivity : ComponentActivity() {
             pages = Pages(ig, yt, onYouTube, script, handlers.toMap())
             main.postDelayed(release, 30 * 60_000L)
         }
+
+        fun open(): List<WebView> = pages?.let { listOfNotNull(it.ig, it.yt) } ?: emptyList()
 
         fun take(): Pages? = pages.also {
             pages = null
@@ -1014,7 +1038,7 @@ class MainActivity : ComponentActivity() {
         if (!::back.isInitialized) return
         val guard = guardScreen.visibility == View.VISIBLE
         val blocked = guard || lockScreen.visibility == View.VISIBLE
-        back.isEnabled = Build.VERSION.SDK_INT < 33 || fullscreenView != null ||
+        back.isEnabled = Build.VERSION.SDK_INT < 33 || fullscreenView != null || theater ||
             (!blocked && web.canGoBack()) || (backToYouTube != null && !guard)
     }
 
@@ -1063,8 +1087,42 @@ class MainActivity : ComponentActivity() {
         fullscreenCallback?.onCustomViewHidden()
         fullscreenCallback = null
         content.visibility = View.VISIBLE
-        setBarsHidden(false)
+        setBarsHidden(theater)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+
+    /**
+     * Con la rotación del teléfono prendida, acostarlo mirando un video de YouTube lo pone en pantalla completa
+     * (como la app oficial) y enderezarlo la saca. El script estira el reproductor (__lucidoTheater): la pantalla
+     * completa del navegador solo se puede pedir con un toque. Sin video (u otra página), no hace nada.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (newConfig.orientation == orientation) return // cambió otra cosa (tema, letra)
+        orientation = newConfig.orientation
+        if (orientation != Configuration.ORIENTATION_LANDSCAPE) return exitTheater()
+        val rotates = Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) == 1
+        if (rotates && onYouTube && fullscreenView == null && lockScreen.visibility != View.VISIBLE) enterTheater()
+    }
+
+    private fun enterTheater() {
+        val v = web
+        v.evaluateJavascript("window.__lucidoTheater ? __lucidoTheater(true) : false") { ok ->
+            if (ok != "true" || theater || web !== v) return@evaluateJavascript
+            theater = true
+            setBarsHidden(true)
+            refreshLockBar()
+            updateBack()
+        }
+    }
+
+    private fun exitTheater() {
+        if (!theater) return
+        theater = false
+        ytWebOrNull?.evaluateJavascript("window.__lucidoTheater && __lucidoTheater(false)", null)
+        if (fullscreenView == null) setBarsHidden(false)
+        refreshLockBar()
+        updateBack()
     }
 
     private fun setBarsHidden(on: Boolean) {
@@ -1092,6 +1150,7 @@ class MainActivity : ComponentActivity() {
         // Las páginas quedan vivas un rato (ver Kept). No si se cerró antes de armarlas (guía, app oficial)
         if (::igWeb.isInitialized) {
             if (fullscreenView != null) exitFullscreen()
+            exitTheater() // la página guardada vuelve sin el reproductor estirado
             Kept.keep(this, igWeb, ytWebOrNull, onYouTube, injectedScript, scriptHandlers)
         }
         super.onDestroy()
@@ -1109,8 +1168,15 @@ class MainActivity : ComponentActivity() {
         const val IG_INBOX = "https://www.instagram.com/direct/inbox/"
         const val YT_HOME = "https://m.youtube.com"
         private const val YT_DARK = 0xFF0F0F0F.toInt() // fondo de YouTube en oscuro (su theme-color)
+        // Forma del video en pantalla completa: "h" horizontal, "v" vertical, "?" si todavía no se sabe
+        private const val VIDEO_SHAPE = "(function(){var f=document.fullscreenElement||document.webkitFullscreenElement;" +
+            "var v=(f&&(f.tagName==='VIDEO'?f:f.querySelector('video')))||document.querySelector('video');" +
+            "return v&&v.videoWidth?(v.videoWidth>=v.videoHeight?'h':'v'):'?'})()"
         const val EXTRA_PAUSE = "pause" // desde la notificación del límite: usar la pausa de emergencia
         const val EXTRA_CHAT = "chat" // desde la notificación de un mensaje: el nombre del chat, para abrirlo
         const val EXTRA_FROM_GUARD = "from_guard" // AppGuard te sacó de la app oficial: quedarse acá
+
+        /** Las páginas de IG Lite y YT Lite que siguen vivas: en la pantalla o guardadas (Kept). Para el APK de prueba. */
+        fun openPages(): List<WebView> = Bridge.screen?.livePages() ?: Kept.open()
     }
 }
